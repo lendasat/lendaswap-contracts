@@ -17,4 +17,4 @@ cd tests
 
 # Run tests
 echo "Running E2E tests..."
-cargo test "$@"
+cargo test "$@" -- --nocapture

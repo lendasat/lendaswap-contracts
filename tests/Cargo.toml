@@ -13,5 +13,8 @@ sha2 = "0.10"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 hex = "0.4"
 
+# Optional: for Gelato Relay integration (see GELATO_INTEGRATION.md)
+# reqwest = { version = "0.12", features = ["json"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

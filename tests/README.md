@@ -47,10 +47,27 @@ Complete happy path test covering:
 - ✅ Contract deployments
 - ✅ Token minting and approvals
 - ✅ Swap creation with hash lock
-- ✅ Swap claim with secret reveal
+- ✅ Swap claim with secret reveal (Bob pays gas)
 - ✅ Automatic Uniswap swap execution
 - ✅ Token transfers to recipient
 - ✅ State verification
+
+### `e2e_gasless_swap.rs`
+
+**NEW!** Gasless execution test using ERC-2771 meta-transactions:
+
+- ✅ 3-party setup (Alice, Bob, Relayer)
+- ✅ Bob signs meta-transaction with EIP-712
+- ✅ Relayer executes transaction and pays gas
+- ✅ Bob receives tokens WITHOUT spending any ETH
+- ✅ Demonstrates production-ready gasless flow
+
+Run specifically:
+```bash
+./run_tests.sh --test e2e_gasless_swap -- --nocapture
+```
+
+This test shows the exact pattern used with Gelato Relay in production. See [`GELATO_INTEGRATION.md`](GELATO_INTEGRATION.md) for production integration details.
 
 ### Contract Bindings
 
@@ -200,13 +217,16 @@ timeout = 300  # 5 minutes
 
 ## Next Steps
 
-Future test scenarios to add:
+**Completed Tests:**
+- ✅ **Meta-transaction test**: Gasless claims via ERC-2771 (see `e2e_gasless_swap.rs`)
+
+**Future test scenarios to add:**
 
 - ⏳ **Refund test**: Test timelock expiration and refund flow
 - ⏳ **Invalid secret test**: Attempt claim with wrong secret
 - ⏳ **Multiple concurrent swaps**: Test multiple users swapping simultaneously
-- ⏳ **Meta-transaction test**: Test gasless claims via ERC-2771
 - ⏳ **Slippage test**: Test with price changes during swap
+- ⏳ **Integration test**: Full Bitcoin (Arkade) ↔ Polygon flow
 
 ## License
 

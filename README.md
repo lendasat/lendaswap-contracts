@@ -178,15 +178,54 @@ let tx = contract
 
 ## Gasless Execution
 
-The contract supports ERC-2771 meta-transactions via the deployed `ERC2771Forwarder`. This allows users to claim swaps without holding POL for gas fees.
+The contract supports **ERC-2771 meta-transactions** via the deployed `ERC2771Forwarder`. This allows users to claim swaps **without holding POL** for gas fees - perfect for your Bitcoin↔Polygon bridge where users shouldn't need to buy gas tokens.
 
-### Using a Relayer
+### How It Works
 
-For production, integrate with:
-- [Gelato Relay](https://docs.gelato.network/developer-services/relay)
-- [OpenZeppelin Defender](https://docs.openzeppelin.com/defender/)
+```
+User signs meta-tx → Submit to Relayer → Relayer executes & pays gas → User receives tokens
+     (off-chain, free)      (Gelato API)        (on-chain)               (no POL needed!)
+```
 
-Both services support ERC-2771 forwarding and can sponsor gas fees.
+### Testing Gasless Execution
+
+Run the E2E gasless swap test:
+
+```bash
+cd tests
+./run_tests.sh --test e2e_gasless_swap -- --nocapture
+```
+
+This demonstrates the complete flow:
+- User signs EIP-712 meta-transaction (no gas)
+- Relayer executes via `ERC2771Forwarder`
+- User receives tokens without spending any ETH/POL
+
+See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for implementation details.
+
+### Production Integration
+
+For production, integrate with a relayer service:
+
+**Option 1: Gelato Relay** (Recommended)
+- Hosted infrastructure for meta-transactions
+- Easy integration with API
+- Pay-per-transaction pricing
+- See [`tests/GELATO_INTEGRATION.md`](tests/GELATO_INTEGRATION.md) for complete guide
+
+**Option 2: OpenZeppelin Defender**
+- Alternative hosted relayer service
+- Similar capabilities to Gelato
+- Good for enterprises
+
+Both services support ERC-2771 and work with your deployed `ERC2771Forwarder`.
+
+### Benefits
+
+- ✅ **Better UX**: Users don't need POL tokens
+- ✅ **Lower barrier**: No need to explain gas to users
+- ✅ **Faster onboarding**: Users can claim immediately after Bitcoin confirmation
+- ✅ **Cost effective**: ~$0.01-0.05 per swap to sponsor gas
 
 ## Security Considerations
 
