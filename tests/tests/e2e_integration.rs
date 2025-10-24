@@ -7,7 +7,6 @@
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::Address;
 use alloy::primitives::FixedBytes;
 use alloy::primitives::U256;
 use alloy::providers::Provider;
