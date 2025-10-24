@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use alloy::{
     network::EthereumWallet,
     node_bindings::Anvil,
@@ -63,15 +65,13 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     // Create providers
     let alice_wallet = EthereumWallet::from(alice_signer.clone());
     let alice_provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(alice_wallet)
-        .on_http(rpc_url.clone());
+        .connect_http(rpc_url.clone());
 
     let bob_wallet = EthereumWallet::from(bob_signer);
     let bob_provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(bob_wallet)
-        .on_http(rpc_url);
+        .connect_http(rpc_url);
 
     // Step 2: Deploy smart contracts
     println!("\n2. Deploying smart contracts...");
@@ -130,7 +130,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     // Swap parameters
     let swap_id = FixedBytes::<32>::from([1u8; 32]); // Using fixed ID for testing
     let amount = U256::from(1_000_000_000_000_000_000u128); // 1 WBTC (18 decimals)
-    let timelock = (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600) as u64; // 1 hour from now
+    let timelock = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600; // 1 hour from now
     let pool_fee = alloy::primitives::Uint::<24, 1>::from(3000u32); // 0.3%
 
     println!("   ✓ Swap ID: 0x{}", hex::encode(swap_id));
@@ -148,7 +148,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("     ✓ Minted WBTC to Alice (tx: {})", mint_tx.transaction_hash);
 
     // Check Alice's balance
-    let alice_wbtc_balance = wbtc.balanceOf(alice_address).call().await?._0;
+    let alice_wbtc_balance = wbtc.balanceOf(alice_address).call().await?;
     println!(
         "     ✓ Alice's WBTC balance: {}",
         alice_wbtc_balance
@@ -187,7 +187,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("     ✓ Swap created (tx: {})", create_tx.transaction_hash);
 
     // Verify swap was created
-    let swap = htlc.getSwap(swap_id).call().await?._0;
+    let swap = htlc.getSwap(swap_id).call().await?;
     println!("     ✓ Swap verified on-chain:");
     println!("       - Sender: {}", swap.sender);
     println!("       - Recipient: {}", swap.recipient);
@@ -195,7 +195,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("       - State: {:?}", swap.state);
 
     // Verify HTLC has the tokens
-    let htlc_wbtc_balance = wbtc.balanceOf(htlc_address).call().await?._0;
+    let htlc_wbtc_balance = wbtc.balanceOf(htlc_address).call().await?;
     println!("     ✓ HTLC WBTC balance: {}", htlc_wbtc_balance);
     assert_eq!(htlc_wbtc_balance, amount, "HTLC should hold the WBTC");
 
@@ -203,7 +203,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("\n5. Executing swap (Bob claims with secret)...");
 
     // Check Bob's USDC balance before
-    let bob_usdc_before = usdc.balanceOf(bob_address).call().await?._0;
+    let bob_usdc_before = usdc.balanceOf(bob_address).call().await?;
     println!("   - Bob's USDC balance before: {}", bob_usdc_before);
 
     // Bob claims the swap by revealing the secret
@@ -221,12 +221,12 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("     ✓ Swap claimed (tx: {})", claim_tx.transaction_hash);
 
     // Verify swap state changed
-    let swap_after = htlc.getSwap(swap_id).call().await?._0;
+    let swap_after = htlc.getSwap(swap_id).call().await?;
     println!("     ✓ Swap state after claim: {:?}", swap_after.state);
     assert_eq!(swap_after.state, 2, "Swap should be in CLAIMED state");
 
     // Check Bob's USDC balance after
-    let bob_usdc_after = usdc.balanceOf(bob_address).call().await?._0;
+    let bob_usdc_after = usdc.balanceOf(bob_address).call().await?;
     println!("   - Bob's USDC balance after: {}", bob_usdc_after);
     println!(
         "     ✓ Bob received: {} USDC",
@@ -240,7 +240,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     );
 
     // Verify HTLC no longer has WBTC
-    let htlc_wbtc_after = wbtc.balanceOf(htlc_address).call().await?._0;
+    let htlc_wbtc_after = wbtc.balanceOf(htlc_address).call().await?;
     println!("   - HTLC WBTC balance after: {}", htlc_wbtc_after);
     assert_eq!(htlc_wbtc_after, U256::ZERO, "HTLC should have no WBTC left");
 

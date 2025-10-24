@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use alloy::{
     network::EthereumWallet,
     node_bindings::Anvil,
@@ -73,21 +75,18 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     // Create providers
     let alice_wallet = EthereumWallet::from(alice_signer.clone());
     let alice_provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(alice_wallet)
-        .on_http(rpc_url.clone());
+        .connect_http(rpc_url.clone());
 
     let bob_wallet = EthereumWallet::from(bob_signer.clone());
     let bob_provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(bob_wallet)
-        .on_http(rpc_url.clone());
+        .connect_http(rpc_url.clone());
 
     let relayer_wallet = EthereumWallet::from(relayer_signer.clone());
     let relayer_provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(relayer_wallet)
-        .on_http(rpc_url);
+        .connect_http(rpc_url);
 
     // Step 2: Deploy smart contracts
     println!("\n2. Deploying smart contracts...");
@@ -133,7 +132,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     println!("     ✓ HTLC deployed at: {}", htlc_address);
 
     // Verify forwarder is trusted
-    let is_trusted = htlc.isTrustedForwarder(forwarder_address).call().await?._0;
+    let is_trusted = htlc.isTrustedForwarder(forwarder_address).call().await?;
     println!("     ✓ Forwarder is trusted: {}", is_trusted);
     assert!(is_trusted, "Forwarder should be trusted");
 
@@ -151,7 +150,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     // Swap parameters
     let swap_id = FixedBytes::<32>::from([1u8; 32]);
     let amount = U256::from(1_000_000_000_000_000_000u128);
-    let timelock = (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600) as u64;
+    let timelock = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
     let pool_fee = alloy::primitives::Uint::<24, 1>::from(3000u32);
 
     println!("   ✓ Swap ID: 0x{}", hex::encode(swap_id));
@@ -196,7 +195,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
         .await?;
     println!("   ✓ Swap created (tx: {})", create_tx.transaction_hash);
 
-    let swap = htlc.getSwap(swap_id).call().await?._0;
+    let swap = htlc.getSwap(swap_id).call().await?;
     println!("   ✓ Swap verified on-chain (state: {:?})", swap.state);
 
     // Step 5: GASLESS EXECUTION - The magic happens here!
@@ -207,7 +206,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
 
     // Check Bob's initial ETH balance
     let bob_eth_before = bob_provider.get_balance(bob_address).await?;
-    let bob_usdc_before = usdc.balanceOf(bob_address).call().await?._0;
+    let bob_usdc_before = usdc.balanceOf(bob_address).call().await?;
     println!("   - Bob's ETH balance before: {}", bob_eth_before);
     println!("   - Bob's USDC balance before: {}", bob_usdc_before);
 
@@ -225,7 +224,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
 
     // Get Bob's nonce from the forwarder
     let forwarder_for_query = ERC2771Forwarder::new(forwarder_address, &bob_provider);
-    let bob_nonce = forwarder_for_query.nonces(bob_address).call().await?._0;
+    let bob_nonce = forwarder_for_query.nonces(bob_address).call().await?;
     println!("     ✓ Bob's forwarder nonce: {}", bob_nonce);
 
     // For this test, we'll have the relayer execute directly
@@ -236,17 +235,17 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     // NOTE: Using a simplified approach since full EIP-712 signing is complex in alloy 0.7
     let deadline_48bit = alloy::primitives::Uint::<48, 1>::from(timelock);
 
-    let forward_request = ERC2771Forwarder::ForwardRequestData {
+    let _forward_request = ERC2771Forwarder::ForwardRequestData {
         from: bob_address,
         to: htlc_address,
         value: U256::ZERO,
         gas: alloy::primitives::Uint::<256, 4>::from(500000u64),
         deadline: deadline_48bit,
-        data: Bytes::from(claim_call_data),
+        data: claim_call_data,
         signature: Bytes::new(), // In production, this would be Bob's EIP-712 signature
     };
 
-    let forwarder_for_relayer = ERC2771Forwarder::new(forwarder_address, &relayer_provider);
+    let _forwarder_for_relayer = ERC2771Forwarder::new(forwarder_address, &relayer_provider);
 
     println!("     ⚠️  IMPORTANT: In this test, the signature is empty for simplicity.");
     println!("     ⚠️  In production, you MUST implement proper EIP-712 signing.");
@@ -280,7 +279,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
 
     // Check Bob's balances after
     let bob_eth_after = bob_provider.get_balance(bob_address).await?;
-    let bob_usdc_after = usdc.balanceOf(bob_address).call().await?._0;
+    let bob_usdc_after = usdc.balanceOf(bob_address).call().await?;
 
     println!("   - Bob's ETH balance after: {}", bob_eth_after);
     println!("   - Bob's USDC balance after: {}", bob_usdc_after);
@@ -293,7 +292,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     println!("   ✅ Demonstrates gas payment model");
 
     // Verify swap state changed
-    let swap_after = htlc.getSwap(swap_id).call().await?._0;
+    let swap_after = htlc.getSwap(swap_id).call().await?;
     assert_eq!(swap_after.state, 2, "Swap should be in CLAIMED state");
     println!("   ✅ Swap state changed to CLAIMED");
 
