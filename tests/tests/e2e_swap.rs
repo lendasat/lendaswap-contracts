@@ -1,16 +1,17 @@
 #![allow(clippy::too_many_arguments)]
 
-use alloy::{
-    network::EthereumWallet,
-    node_bindings::Anvil,
-    primitives::{FixedBytes, U256},
-    providers::ProviderBuilder,
-    signers::local::PrivateKeySigner,
-    sol,
-};
+use alloy::network::EthereumWallet;
+use alloy::node_bindings::Anvil;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U256;
+use alloy::providers::ProviderBuilder;
+use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
 use anyhow::Result;
-use sha2::{Digest, Sha256};
-use std::time::{SystemTime, UNIX_EPOCH};
+use sha2::Digest;
+use sha2::Sha256;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 // Generate contract bindings using sol! macro
 sol!(
@@ -88,12 +89,8 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
     println!("     ✓ WBTC deployed at: {}", wbtc_address);
 
     println!("   - Deploying USDC...");
-    let usdc = MockERC20::deploy(
-        &alice_provider,
-        "USD Coin".to_string(),
-        "USDC".to_string(),
-    )
-    .await?;
+    let usdc =
+        MockERC20::deploy(&alice_provider, "USD Coin".to_string(), "USDC".to_string()).await?;
     let usdc_address = *usdc.address();
     println!("     ✓ USDC deployed at: {}", usdc_address);
 
@@ -105,8 +102,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
 
     // Deploy ERC2771 Forwarder
     println!("   - Deploying ERC2771Forwarder...");
-    let forwarder =
-        ERC2771Forwarder::deploy(&alice_provider, "TestForwarder".to_string()).await?;
+    let forwarder = ERC2771Forwarder::deploy(&alice_provider, "TestForwarder".to_string()).await?;
     let forwarder_address = *forwarder.address();
     println!("     ✓ Forwarder deployed at: {}", forwarder_address);
 
@@ -145,14 +141,14 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
         .await?
         .get_receipt()
         .await?;
-    println!("     ✓ Minted WBTC to Alice (tx: {})", mint_tx.transaction_hash);
+    println!(
+        "     ✓ Minted WBTC to Alice (tx: {})",
+        mint_tx.transaction_hash
+    );
 
     // Check Alice's balance
     let alice_wbtc_balance = wbtc.balanceOf(alice_address).call().await?;
-    println!(
-        "     ✓ Alice's WBTC balance: {}",
-        alice_wbtc_balance
-    );
+    println!("     ✓ Alice's WBTC balance: {}", alice_wbtc_balance);
 
     // Step 4: Create swap
     println!("\n4. Creating atomic swap...");

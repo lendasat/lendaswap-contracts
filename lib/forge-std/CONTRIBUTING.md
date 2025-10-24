@@ -40,8 +40,8 @@ elsewhere.
 
 If you have reviewed existing documentation and still have questions, or you are having problems, you can get help in the following ways:
 
--   **Asking in the support Telegram:** The [Foundry Support Telegram][support-tg] is a fast and easy way to ask questions.
--   **Opening a discussion:** This repository comes with a discussions board where you can also ask for help. Click the "Discussions" tab at the top.
+- **Asking in the support Telegram:** The [Foundry Support Telegram][support-tg] is a fast and easy way to ask questions.
+- **Opening a discussion:** This repository comes with a discussions board where you can also ask for help. Click the "Discussions" tab at the top.
 
 As Foundry is still in heavy development, the documentation can be a bit scattered.
 The [Foundry Book][foundry-book] is our current best-effort attempt at keeping up-to-date information.
@@ -54,10 +54,10 @@ If you believe that you have uncovered a bug, please fill out the form to the be
 
 The most important pieces of information we need in a bug report are:
 
--   The Foundry version you are on (and that it is up to date)
--   The platform you are on (Windows, macOS, an M1 Mac or Linux)
--   Code snippets if this is happening in relation to testing or building code
--   Concrete steps to reproduce the bug
+- The Foundry version you are on (and that it is up to date)
+- The platform you are on (Windows, macOS, an M1 Mac or Linux)
+- Code snippets if this is happening in relation to testing or building code
+- Concrete steps to reproduce the bug
 
 In order to rule out the possibility of the bug being in your project, the code snippets should be as minimal
 as possible. It is better if you can reproduce the bug with a small snippet as opposed to an entire project!
@@ -173,7 +173,7 @@ Be aware that _how_ you communicate requests and reviews in your feedback can ha
 
 ##### Abandoned or stale pull requests
 
-If a pull request appears to be abandoned or stalled, it is polite to first check with the contributor to see if they intend to continue the work before checking if they would mind if you took it over (especially if it just has nits left). When doing so, it is courteous to give the original contributor credit for the work they started, either by preserving their name and e-mail address in the commit log, or by using the `Author: ` or `Co-authored-by: ` metadata tag in the commits.
+If a pull request appears to be abandoned or stalled, it is polite to first check with the contributor to see if they intend to continue the work before checking if they would mind if you took it over (especially if it just has nits left). When doing so, it is courteous to give the original contributor credit for the work they started, either by preserving their name and e-mail address in the commit log, or by using the `Author:` or `Co-authored-by:` metadata tag in the commits.
 
 _Adapted from the [ethers-rs contributing guide](https://github.com/gakonst/ethers-rs/blob/master/CONTRIBUTING.md)_.
 

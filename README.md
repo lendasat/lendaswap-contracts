@@ -37,21 +37,25 @@ The main contract that handles the swap lifecycle:
 ## Setup
 
 1. Navigate to the contracts directory:
+
 ```bash
 cd contracts
 ```
 
 2. Install dependencies:
+
 ```bash
 forge install
 ```
 
 3. Copy `.env.example` to `.env` and configure:
+
 ```bash
 cp ../.env.example .env
 ```
 
 Required environment variables:
+
 ```bash
 RPC_URL=your_polygon_rpc_url
 PRIVATE_KEY=your_private_key_for_deployment
@@ -61,21 +65,25 @@ UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564  # Polygon
 ## Testing
 
 Run all tests:
+
 ```bash
 source ~/.zshenv && forge test
 ```
 
 Run with verbose output:
+
 ```bash
 source ~/.zshenv && forge test -vv
 ```
 
 Run specific test:
+
 ```bash
 source ~/.zshenv && forge test --match-test testClaimSwap -vvv
 ```
 
 Run with gas reporting:
+
 ```bash
 source ~/.zshenv && forge test --gas-report
 ```
@@ -105,6 +113,7 @@ cd tests
 ```
 
 The E2E test suite covers:
+
 - ✅ Local blockchain setup (Anvil)
 - ✅ Contract deployment
 - ✅ Complete swap lifecycle (create → claim)
@@ -197,6 +206,7 @@ cd tests
 ```
 
 This demonstrates the complete flow:
+
 - User signs EIP-712 meta-transaction (no gas)
 - Relayer executes via `ERC2771Forwarder`
 - User receives tokens without spending any ETH/POL
@@ -208,12 +218,14 @@ See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for imp
 For production, integrate with a relayer service:
 
 **Option 1: Gelato Relay** (Recommended)
+
 - Hosted infrastructure for meta-transactions
 - Easy integration with API
 - Pay-per-transaction pricing
 - See [`tests/GELATO_INTEGRATION.md`](tests/GELATO_INTEGRATION.md) for complete guide
 
 **Option 2: OpenZeppelin Defender**
+
 - Alternative hosted relayer service
 - Similar capabilities to Gelato
 - Good for enterprises
@@ -251,11 +263,13 @@ Both services support ERC-2771 and work with your deployed `ERC2771Forwarder`.
 ## Contract Addresses
 
 ### Polygon Mainnet
+
 - WBTC: `0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6`
 - USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
 - Uniswap V3 Router: `0xE592427A0AEce92De3Edee1F18E0157C05861564`
 
 ### Mumbai Testnet
+
 - WBTC: Check Polygon docs
 - USDC: Check Polygon docs
 - Uniswap V3 Router: `0xE592427A0AEce92De3Edee1F18E0157C05861564`

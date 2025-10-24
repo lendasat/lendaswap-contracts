@@ -68,12 +68,13 @@ GELATO_RELAY_URL=https://relay.gelato.digital
 This is what Bob (the user) does. **No gas tokens needed!**
 
 ```rust
-use alloy::{
-    primitives::{Address, Bytes, FixedBytes, U256},
-    signers::local::PrivateKeySigner,
-    sol,
-    sol_types::SolStruct,
-};
+use alloy::primitives::Address;
+use alloy::primitives::Bytes;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U256;
+use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
+use alloy::sol_types::SolStruct;
 
 sol! {
     struct ForwardRequest {
@@ -105,11 +106,7 @@ pub async fn create_gasless_claim_request(
     let call_data = claim_call.abi_encode();
 
     // 2. Get deadline (current time + 5 minutes)
-    let deadline = U256::from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() + 300
-    );
+    let deadline = U256::from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 300);
 
     // 3. Create ForwardRequest
     let request = ForwardRequest {
@@ -166,7 +163,8 @@ This is what your backend does (or Bob can do directly from browser).
 
 ```rust
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -192,10 +190,7 @@ struct TaskStatus {
     block_number: Option<u64>,
 }
 
-pub async fn submit_to_gelato(
-    api_key: &str,
-    request: GelatoRequest,
-) -> Result<String> {
+pub async fn submit_to_gelato(api_key: &str, request: GelatoRequest) -> Result<String> {
     let client = Client::new();
 
     let response = client
@@ -216,10 +211,7 @@ pub async fn submit_to_gelato(
     Ok(gelato_response.task_id)
 }
 
-pub async fn check_task_status(
-    api_key: &str,
-    task_id: &str,
-) -> Result<TaskStatus> {
+pub async fn check_task_status(api_key: &str, task_id: &str) -> Result<TaskStatus> {
     let client = Client::new();
 
     let response = client
@@ -270,7 +262,8 @@ impl GaslessSwapClaimer {
             swap_id,
             secret,
             nonce,
-        ).await?;
+        )
+        .await?;
 
         // 3. Submit to Gelato
         println!("Submitting to Gelato Relay...");
@@ -285,9 +278,11 @@ impl GaslessSwapClaimer {
     }
 
     async fn wait_for_execution(&self, task_id: &str) -> Result<String> {
-        use tokio::time::{sleep, Duration};
+        use tokio::time::sleep;
+        use tokio::time::Duration;
 
-        for _ in 0..60 {  // Try for 1 minute
+        for _ in 0..60 {
+            // Try for 1 minute
             let status = check_task_status(&self.gelato_api_key, task_id).await?;
 
             match status.task_state.as_str() {
@@ -392,15 +387,18 @@ This simulates the exact flow without needing Gelato API keys.
 ## Troubleshooting
 
 ### "Insufficient funds"
+
 - Fund your Gelato account with POL
 - Check balance in Gelato dashboard
 
 ### "Invalid signature"
+
 - Ensure EIP-712 domain matches deployed forwarder
 - Check chain ID (137 for mainnet, 80001 for Mumbai)
 - Verify nonce is correct
 
 ### "Transaction reverted"
+
 - Check if swap is still open
 - Verify secret is correct
 - Ensure timelock hasn't expired
@@ -450,8 +448,10 @@ Both services support ERC-2771 and work with the same contract implementation.
 ## Support
 
 For Gelato-specific issues:
+
 - Discord: https://discord.gg/gelato
 - Telegram: https://t.me/gelatonetwork
 
 For contract issues:
+
 - Open an issue in this repository

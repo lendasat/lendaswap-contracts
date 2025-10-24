@@ -1,16 +1,19 @@
 #![allow(clippy::too_many_arguments)]
 
-use alloy::{
-    network::EthereumWallet,
-    node_bindings::Anvil,
-    primitives::{FixedBytes, U256, Bytes},
-    providers::{Provider, ProviderBuilder},
-    signers::local::PrivateKeySigner,
-    sol,
-};
+use alloy::network::EthereumWallet;
+use alloy::node_bindings::Anvil;
+use alloy::primitives::Bytes;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U256;
+use alloy::providers::Provider;
+use alloy::providers::ProviderBuilder;
+use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
 use anyhow::Result;
-use sha2::{Digest, Sha256};
-use std::time::{SystemTime, UNIX_EPOCH};
+use sha2::Digest;
+use sha2::Sha256;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 // Generate contract bindings using sol! macro
 sol!(
@@ -70,7 +73,10 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
 
     println!("   ✓ Alice address: {} (swap creator)", alice_address);
     println!("   ✓ Bob address: {} (will receive gaslessly)", bob_address);
-    println!("   ✓ Relayer address: {} (pays gas for Bob)", relayer_address);
+    println!(
+        "   ✓ Relayer address: {} (pays gas for Bob)",
+        relayer_address
+    );
 
     // Create providers
     let alice_wallet = EthereumWallet::from(alice_signer.clone());
@@ -103,12 +109,8 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
     println!("     ✓ WBTC deployed at: {}", wbtc_address);
 
     println!("   - Deploying USDC...");
-    let usdc = MockERC20::deploy(
-        &alice_provider,
-        "USD Coin".to_string(),
-        "USDC".to_string(),
-    )
-    .await?;
+    let usdc =
+        MockERC20::deploy(&alice_provider, "USD Coin".to_string(), "USDC".to_string()).await?;
     let usdc_address = *usdc.address();
     println!("     ✓ USDC deployed at: {}", usdc_address);
 
@@ -165,7 +167,10 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
         .await?
         .get_receipt()
         .await?;
-    println!("     ✓ Minted WBTC to Alice (tx: {})", mint_tx.transaction_hash);
+    println!(
+        "     ✓ Minted WBTC to Alice (tx: {})",
+        mint_tx.transaction_hash
+    );
 
     // Step 4: Alice creates swap (same as regular flow)
     println!("\n4. Alice creating atomic swap...");

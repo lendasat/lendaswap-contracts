@@ -5,6 +5,7 @@ End-to-end integration tests for the Lendaswap atomic swap smart contracts, writ
 ## Overview
 
 These tests verify the complete atomic swap flow:
+
 1. **Setup**: Local blockchain (Anvil) with test accounts
 2. **Deploy**: Smart contracts (HTLC, Forwarder, Mock tokens)
 3. **Create Swap**: Alice locks WBTC with hash lock and timelock
@@ -63,6 +64,7 @@ Complete happy path test covering:
 - ✅ Demonstrates production-ready gasless flow
 
 Run specifically:
+
 ```bash
 ./run_tests.sh --test e2e_gasless_swap -- --nocapture
 ```
@@ -74,10 +76,14 @@ This test shows the exact pattern used with Gelato Relay in production. See [`GE
 The tests use `alloy::sol!` macro to generate type-safe contract bindings from compiled artifacts:
 
 ```rust
-sol!(AtomicSwapHTLC, "../out/AtomicSwapHTLC.sol/AtomicSwapHTLC.json");
+sol!(
+    AtomicSwapHTLC,
+    "../out/AtomicSwapHTLC.sol/AtomicSwapHTLC.json"
+);
 ```
 
 This provides:
+
 - Type-safe function calls
 - Automatic ABI encoding/decoding
 - Event parsing
@@ -189,11 +195,13 @@ let tx = htlc
 ### "No such file or directory" for anvil
 
 Make sure to source your shell environment:
+
 ```bash
 source ~/.zshenv && cargo test
 ```
 
 Or add Foundry to your PATH:
+
 ```bash
 export PATH="$HOME/.foundry/bin:$PATH"
 ```
@@ -201,6 +209,7 @@ export PATH="$HOME/.foundry/bin:$PATH"
 ### Contract artifacts not found
 
 Compile contracts first:
+
 ```bash
 cd ..
 forge build
@@ -210,14 +219,16 @@ cd tests
 ### Test timeout
 
 Increase timeout in Cargo.toml:
+
 ```toml
 [profile.test]
-timeout = 300  # 5 minutes
+timeout = 300 # 5 minutes
 ```
 
 ## Next Steps
 
 **Completed Tests:**
+
 - ✅ **Meta-transaction test**: Gasless claims via ERC-2771 (see `e2e_gasless_swap.rs`)
 
 **Future test scenarios to add:**
