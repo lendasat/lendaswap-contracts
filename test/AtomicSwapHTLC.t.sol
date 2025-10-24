@@ -59,7 +59,9 @@ contract AtomicSwapHTLCTest is Test {
         // Deploy mock router
         router = new MockSwapRouter();
 
-        // Deploy forwarder for meta-transactions
+        // Deploy forwarder for meta-transactions (LOCAL TESTING ONLY)
+        // NOTE: Production deployments use Gelato's public GelatoRelay1BalanceERC2771 forwarder
+        // at 0xd8253782c45a12053594b9deB72d8e8aB2Fca54c on Polygon mainnet
         forwarder = new ERC2771Forwarder("ERC2771Forwarder");
 
         // Deploy HTLC contract
