@@ -111,7 +111,8 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
     println!("     ✓ WBTC: {}", wbtc_address);
 
     println!("   - Deploying USDC...");
-    let usdc = MockERC20::deploy(&alice_provider, "USD Coin".to_string(), "USDC".to_string()).await?;
+    let usdc =
+        MockERC20::deploy(&alice_provider, "USD Coin".to_string(), "USDC".to_string()).await?;
     let usdc_address = *usdc.address();
     println!("     ✓ USDC: {}", usdc_address);
 
@@ -123,7 +124,8 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
 
     // Deploy Forwarder
     println!("   - Deploying ERC2771Forwarder...");
-    let forwarder = ERC2771Forwarder::deploy(&alice_provider, "LendaswapForwarder".to_string()).await?;
+    let forwarder =
+        ERC2771Forwarder::deploy(&alice_provider, "LendaswapForwarder".to_string()).await?;
     let forwarder_address = *forwarder.address();
     println!("     ✓ Forwarder: {}", forwarder_address);
 
@@ -165,7 +167,10 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
         .await?
         .get_receipt()
         .await?;
-    println!("   ✓ Minted WBTC to Alice (tx: {})", mint_tx.transaction_hash);
+    println!(
+        "   ✓ Minted WBTC to Alice (tx: {})",
+        mint_tx.transaction_hash
+    );
 
     // Step 4: Create swap on HTLC
     println!("\n4. Alice creating HTLC swap...");
@@ -195,7 +200,10 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
         .await?
         .get_receipt()
         .await?;
-    println!("   ✓ HTLC swap created (tx: {})", create_tx.transaction_hash);
+    println!(
+        "   ✓ HTLC swap created (tx: {})",
+        create_tx.transaction_hash
+    );
 
     // Verify swap state
     let swap = htlc.getSwap(swap_id).call().await?;
