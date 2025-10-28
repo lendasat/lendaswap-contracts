@@ -163,6 +163,8 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
         .await?;
     println!("     ✓ Approved (tx: {})", approve_tx.transaction_hash);
 
+    // todo: wait for it being mined
+
     // Alice creates the swap
     println!("   - Alice creating swap...");
     let create_tx = htlc
