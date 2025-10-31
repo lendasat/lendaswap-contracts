@@ -23,7 +23,7 @@ interface ISwapRouter {
 }
 
 /// @title AtomicSwapHTLC - Hash Time Locked Contract for Atomic Swaps with Uniswap Integration
-/// @notice Enables gasless atomic swaps between Bitcoin (via Arkade) and Polygon tokens
+/// @notice Enables gasless atomic swaps between Bitcoin and Polygon tokens
 /// @dev Uses ERC-2771 for meta-transactions (gasless execution) and HTLCs for atomic swaps
 contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -59,6 +59,7 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         uint256 timelock; // Unix timestamp after which refund is possible
         SwapState state;
         uint24 poolFee; // Uniswap pool fee (e.g., 3000 = 0.3%)
+        uint256 minAmountOut; // Minimum amount of tokenOut to receive (slippage protection)
     }
 
     // State variables
@@ -85,6 +86,7 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     /// @param hashLock Hash of the secret (sha256)
     /// @param timelock Unix timestamp after which refund is possible
     /// @param poolFee Uniswap pool fee tier (500, 3000, or 10000)
+    /// @param minAmountOut Minimum amount of tokenOut to receive (slippage protection)
     function createSwap(
         bytes32 swapId,
         address recipient,
@@ -93,7 +95,8 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         uint256 amountIn,
         bytes32 hashLock,
         uint256 timelock,
-        uint24 poolFee
+        uint24 poolFee,
+        uint256 minAmountOut
     ) external nonReentrant {
         require(swaps[swapId].state == SwapState.INVALID, "Swap already exists");
         require(recipient != address(0), "Invalid recipient");
@@ -115,7 +118,8 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             hashLock: hashLock,
             timelock: timelock,
             state: SwapState.OPEN,
-            poolFee: poolFee
+            poolFee: poolFee,
+            minAmountOut: minAmountOut
         });
 
         emit SwapCreated(swapId, _msgSender(), recipient, amountIn, hashLock, timelock);
@@ -144,7 +148,7 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             recipient: swap.recipient,
             deadline: block.timestamp,
             amountIn: swap.amountIn,
-            amountOutMinimum: 0, // No slippage protection - could be improved
+            amountOutMinimum: swap.minAmountOut, // Slippage protection
             sqrtPriceLimitX96: 0
         });
 

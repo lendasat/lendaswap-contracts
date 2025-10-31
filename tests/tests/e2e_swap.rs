@@ -167,6 +167,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
 
     // Alice creates the swap
     println!("   - Alice creating swap...");
+    let min_amount_out = U256::ZERO; // No slippage protection for this test
     let create_tx = htlc
         .createSwap(
             swap_id,
@@ -177,6 +178,7 @@ async fn test_e2e_atomic_swap_happy_path() -> Result<()> {
             hash_lock,
             U256::from(timelock),
             pool_fee,
+            min_amount_out,
         )
         .send()
         .await?

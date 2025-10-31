@@ -184,6 +184,7 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
     println!("   ✓ Approved (tx: {})", approve_tx.transaction_hash);
 
     // Create the swap
+    let min_amount_out = U256::ZERO; // No slippage protection for this test
     let create_tx = htlc
         .createSwap(
             swap_id,
@@ -194,6 +195,7 @@ async fn test_e2e_lendaswap_integration() -> Result<()> {
             hash_lock,
             U256::from(timelock),
             pool_fee,
+            min_amount_out,
         )
         .send()
         .await?

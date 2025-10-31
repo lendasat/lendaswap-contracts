@@ -183,6 +183,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
         .await?;
     println!("   ✓ Approved (tx: {})", approve_tx.transaction_hash);
 
+    let min_amount_out = U256::ZERO; // No slippage protection for this test
     let create_tx = htlc
         .createSwap(
             swap_id,
@@ -193,6 +194,7 @@ async fn test_e2e_gasless_atomic_swap() -> Result<()> {
             hash_lock,
             U256::from(timelock),
             pool_fee,
+            min_amount_out,
         )
         .send()
         .await?
