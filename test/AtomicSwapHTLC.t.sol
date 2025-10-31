@@ -307,7 +307,18 @@ contract AtomicSwapHTLCTest is Test {
 
         // Test SwapCreated event
         vm.expectEmit(true, true, true, true);
-        emit AtomicSwapHTLC.SwapCreated(swapId, alice, bob, amount, hashLock, block.timestamp + 1 hours);
+        emit AtomicSwapHTLC.SwapCreated(
+            swapId,
+            alice,
+            bob,
+            address(wbtc),
+            address(usdc),
+            amount,
+            hashLock,
+            block.timestamp + 1 hours,
+            3000,
+            0
+        );
 
         htlc.createSwap(
             swapId, bob, address(wbtc), address(usdc), amount, hashLock, block.timestamp + 1 hours, 3000, 0

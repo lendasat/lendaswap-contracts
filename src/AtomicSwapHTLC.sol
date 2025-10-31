@@ -33,9 +33,13 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         bytes32 indexed swapId,
         address indexed sender,
         address indexed recipient,
+        address tokenIn,
+        address tokenOut,
         uint256 amount,
         bytes32 hashLock,
-        uint256 timelock
+        uint256 timelock,
+        uint24 poolFee,
+        uint256 minAmountOut
     );
     event SwapClaimed(bytes32 indexed swapId, bytes32 secret);
     event SwapRefunded(bytes32 indexed swapId);
@@ -122,7 +126,18 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             minAmountOut: minAmountOut
         });
 
-        emit SwapCreated(swapId, _msgSender(), recipient, amountIn, hashLock, timelock);
+        emit SwapCreated(
+            swapId,
+            _msgSender(),
+            recipient,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            hashLock,
+            timelock,
+            poolFee,
+            minAmountOut
+        );
     }
 
     /// @notice Claim a swap by revealing the secret (performs Uniswap swap and sends tokens)
