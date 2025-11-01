@@ -150,32 +150,32 @@ sol! {
 
 ```rust
 let provider = ProviderBuilder::new()
-    .with_recommended_fillers()
-    .wallet(wallet)
-    .on_http(rpc_url);
+.with_recommended_fillers()
+.wallet(wallet)
+.on_http(polygon_rpc_url);
 
-let htlc = AtomicSwapHTLC::new(htlc_address, &provider);
+let htlc = AtomicSwapHTLC::new(htlc_address, & provider);
 
 // Generate secret (coordinate with Bitcoin side)
-let secret = FixedBytes::<32>::from(random_bytes());
-let hash_lock = sha256(&secret);
+let secret = FixedBytes::<32 >::from(random_bytes());
+let hash_lock = sha256( & secret);
 
 // Create swap
 let tx = htlc
-    .createSwap(
-        swap_id,
-        recipient,
-        wbtc_address,
-        usdc_address,
-        amount,
-        hash_lock,
-        timelock,
-        pool_fee
-    )
-    .send()
-    .await?
-    .get_receipt()
-    .await?;
+.createSwap(
+swap_id,
+recipient,
+wbtc_address,
+usdc_address,
+amount,
+hash_lock,
+timelock,
+pool_fee
+)
+.send()
+.await?
+.get_receipt()
+.await?;
 ```
 
 ### 4. Claim Swap
@@ -183,11 +183,11 @@ let tx = htlc
 ```rust
 // After Bitcoin side completes, reveal secret
 let tx = htlc
-    .claimSwap(swap_id, secret)
-    .send()
-    .await?
-    .get_receipt()
-    .await?;
+.claimSwap(swap_id, secret)
+.send()
+.await?
+.get_receipt()
+.await?;
 ```
 
 ## Troubleshooting
