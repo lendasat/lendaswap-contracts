@@ -66,7 +66,6 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         SwapState state;
         uint24 poolFee; // Uniswap pool fee (e.g., 3000 = 0.3%)
         uint256 minAmountOut; // Minimum amount of tokenOut to receive (slippage protection)
-        uint256 minRefundAmount; // Minimum USDC to receive on refund (slippage protection)
     }
 
     // State variables
@@ -94,7 +93,6 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     /// @param timelock Unix timestamp after which refund is possible
     /// @param poolFee Uniswap pool fee tier (500, 3000, or 10000)
     /// @param minAmountOut Minimum amount of WBTC to receive from swap (slippage protection)
-    /// @param minRefundAmount Minimum USDC to receive on refund swap (slippage protection)
     function createSwap(
         bytes32 swapId,
         address recipient,
@@ -104,8 +102,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         bytes32 hashLock,
         uint256 timelock,
         uint24 poolFee,
-        uint256 minAmountOut,
-        uint256 minRefundAmount
+        uint256 minAmountOut
     ) external nonReentrant {
         require(swaps[swapId].state == SwapState.INVALID, "Swap already exists");
         require(recipient != address(0), "Invalid recipient");
@@ -146,8 +143,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             timelock: timelock,
             state: SwapState.OPEN,
             poolFee: poolFee,
-            minAmountOut: minAmountOut,
-            minRefundAmount: minRefundAmount
+            minAmountOut: minAmountOut
         });
 
         emit SwapCreated(
@@ -184,6 +180,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     }
 
     /// @notice Refund a swap after timelock expires - swaps WBTC back to USDC before refunding
+    /// @dev No slippage protection on refund to prevent permanent fund locking if price moves during timelock
     /// @param swapId The swap identifier
     function refundSwap(bytes32 swapId) external nonReentrant {
         Swap storage swap = swaps[swapId];
@@ -198,6 +195,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         IERC20(swap.tokenOut).forceApprove(address(swapRouter), swap.amountOut);
 
         // Execute Uniswap swap: WBTC -> USDC
+        // Note: amountOutMinimum = 0 to prevent permanent fund locking if price drops during timelock
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: swap.tokenOut,
             tokenOut: swap.tokenIn,
@@ -205,7 +203,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             recipient: swap.sender, // Sender receives USDC directly
             deadline: block.timestamp,
             amountIn: swap.amountOut,
-            amountOutMinimum: swap.minRefundAmount, // Slippage protection for refund
+            amountOutMinimum: 0, // No slippage protection - accept any amount rather than risk losing funds
             sqrtPriceLimitX96: 0
         });
 
