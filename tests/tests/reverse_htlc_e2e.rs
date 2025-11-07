@@ -8,7 +8,8 @@
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::{Address, FixedBytes};
+use alloy::primitives::Address;
+use alloy::primitives::FixedBytes;
 use alloy::providers::ProviderBuilder;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
