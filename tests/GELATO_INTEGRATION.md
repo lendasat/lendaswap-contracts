@@ -278,8 +278,8 @@ impl GaslessSwapClaimer {
     }
 
     async fn wait_for_execution(&self, task_id: &str) -> Result<String> {
-        use tokio::time::sleep;
         use tokio::time::Duration;
+        use tokio::time::sleep;
 
         for _ in 0..60 {
             // Try for 1 minute

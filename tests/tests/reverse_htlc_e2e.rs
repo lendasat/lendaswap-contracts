@@ -98,5 +98,7 @@ async fn test_reverse_htlc_deployment_and_basic_operations() {
     println!("✓ Contract configuration verified");
     println!("✓ Read operations working correctly");
     println!("\nNote: Full swap lifecycle tests (create, claim, refund) are covered in the");
-    println!("Solidity test suite. Run with: cd ../../ && forge test --match-contract ReverseAtomicSwapHTLC");
+    println!(
+        "Solidity test suite. Run with: cd ../../ && forge test --match-contract ReverseAtomicSwapHTLC"
+    );
 }
