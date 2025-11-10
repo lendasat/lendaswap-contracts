@@ -152,22 +152,22 @@ For browser/mobile clients:
 ```javascript
 // ethers.js example
 const domain = {
-  name: 'LendaswapForwarder',
-  version: '1',
+  name: "LendaswapForwarder",
+  version: "1",
   chainId: 137,
-  verifyingContract: forwarderAddress
+  verifyingContract: forwarderAddress,
 };
 
 const types = {
   ForwardRequest: [
-    { name: 'from', type: 'address' },
-    { name: 'to', type: 'address' },
-    { name: 'value', type: 'uint256' },
-    { name: 'gas', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'deadline', type: 'uint256' },
-    { name: 'data', type: 'bytes' }
-  ]
+    { name: "from", type: "address" },
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "gas", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+    { name: "data", type: "bytes" },
+  ],
 };
 
 const signature = await signer._signTypedData(domain, types, request);
