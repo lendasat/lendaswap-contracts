@@ -22,10 +22,10 @@ interface ISwapRouter {
     function exactInputSingle(ExactInputSingleParams calldata params) external returns (uint256 amountOut);
 }
 
-/// @title AtomicSwapHTLC - Hash Time Locked Contract for Atomic Swaps with Uniswap Integration
-/// @notice Enables gasless atomic swaps between Bitcoin and Polygon tokens
+/// @title ReverseAtomicSwapHTLC - Hash Time Locked Contract with Reverse Swap Logic
+/// @notice Swaps USDC to WBTC on creation, locks WBTC, and swaps back WBTC to USDC on refund
 /// @dev Uses ERC-2771 for meta-transactions (gasless execution) and HTLCs for atomic swaps
-contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
+contract ReverseAtomicSwapHTLCRecoverable is ERC2771Context, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Events
@@ -35,14 +35,15 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         address indexed recipient,
         address tokenIn,
         address tokenOut,
-        uint256 amount,
+        uint256 amountIn,
+        uint256 amountOut,
         bytes32 hashLock,
         uint256 timelock,
         uint24 poolFee,
         uint256 minAmountOut
     );
     event SwapClaimed(bytes32 indexed swapId, bytes32 secret);
-    event SwapRefunded(bytes32 indexed swapId);
+    event SwapRefunded(bytes32 indexed swapId, uint256 usdcRefunded);
     event TokensRecovered(address indexed token, address indexed recipient, uint256 amount);
 
     // Swap states
@@ -57,9 +58,10 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     struct Swap {
         address sender;
         address recipient;
-        address tokenIn; // Token to lock (e.g., WBTC)
-        address tokenOut; // Token to receive after swap (e.g., USDC)
-        uint256 amountIn;
+        address tokenIn; // Token received from sender (e.g., USDC)
+        address tokenOut; // Token locked in contract (e.g., WBTC)
+        uint256 amountIn; // Original USDC amount
+        uint256 amountOut; // Amount of WBTC locked after swap
         bytes32 hashLock; // Hash of the secret (preimage)
         uint256 timelock; // Unix timestamp after which refund is possible
         SwapState state;
@@ -82,16 +84,16 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         swapRouter = ISwapRouter(_swapRouter);
     }
 
-    /// @notice Create a new HTLC swap
+    /// @notice Create a new HTLC swap - swaps USDC to WBTC immediately and locks WBTC
     /// @param swapId Unique identifier for this swap
-    /// @param recipient Address to receive tokens after swap
-    /// @param tokenIn Token to lock (must be approved beforehand)
-    /// @param tokenOut Token to receive after Uniswap swap
-    /// @param amountIn Amount of tokenIn to lock
+    /// @param recipient Address to receive WBTC after claim
+    /// @param tokenIn Token to receive from sender (USDC)
+    /// @param tokenOut Token to lock (WBTC)
+    /// @param amountIn Amount of USDC to swap
     /// @param hashLock Hash of the secret (sha256)
     /// @param timelock Unix timestamp after which refund is possible
     /// @param poolFee Uniswap pool fee tier (500, 3000, or 10000)
-    /// @param minAmountOut Minimum amount of tokenOut to receive (slippage protection)
+    /// @param minAmountOut Minimum amount of WBTC to receive from swap (slippage protection)
     function createSwap(
         bytes32 swapId,
         address recipient,
@@ -110,16 +112,34 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         require(timelock > block.timestamp, "Timelock must be in future");
         require(hashLock != bytes32(0), "Invalid hash lock");
 
-        // Transfer tokens from sender to this contract
+        // Transfer USDC from sender to this contract
         IERC20(tokenIn).safeTransferFrom(_msgSender(), address(this), amountIn);
 
-        // Create swap
+        // Approve Uniswap router to spend USDC
+        IERC20(tokenIn).forceApprove(address(swapRouter), amountIn);
+
+        // Execute Uniswap swap: USDC -> WBTC
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
+            fee: poolFee,
+            recipient: address(this), // Contract receives WBTC
+            deadline: block.timestamp,
+            amountIn: amountIn,
+            amountOutMinimum: minAmountOut, // Slippage protection
+            sqrtPriceLimitX96: 0
+        });
+
+        uint256 wbtcReceived = swapRouter.exactInputSingle(params);
+
+        // Create swap with locked WBTC
         swaps[swapId] = Swap({
             sender: _msgSender(),
             recipient: recipient,
             tokenIn: tokenIn,
             tokenOut: tokenOut,
             amountIn: amountIn,
+            amountOut: wbtcReceived,
             hashLock: hashLock,
             timelock: timelock,
             state: SwapState.OPEN,
@@ -134,6 +154,7 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
             tokenIn,
             tokenOut,
             amountIn,
+            wbtcReceived,
             hashLock,
             timelock,
             poolFee,
@@ -141,7 +162,7 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
         );
     }
 
-    /// @notice Claim a swap by revealing the secret (performs Uniswap swap and sends tokens)
+    /// @notice Claim a swap by revealing the secret (sends locked WBTC to recipient)
     /// @param swapId The swap identifier
     /// @param secret The preimage of the hash lock
     function claimSwap(bytes32 swapId, bytes32 secret) external nonReentrant {
@@ -153,27 +174,14 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
 
         swap.state = SwapState.CLAIMED;
 
-        // Approve Uniswap router to spend tokens
-        IERC20(swap.tokenIn).forceApprove(address(swapRouter), swap.amountIn);
-
-        // Execute Uniswap swap
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: swap.tokenIn,
-            tokenOut: swap.tokenOut,
-            fee: swap.poolFee,
-            recipient: swap.recipient,
-            deadline: block.timestamp,
-            amountIn: swap.amountIn,
-            amountOutMinimum: swap.minAmountOut, // Slippage protection
-            sqrtPriceLimitX96: 0
-        });
-
-        swapRouter.exactInputSingle(params);
+        // Transfer locked WBTC to recipient
+        IERC20(swap.tokenOut).safeTransfer(swap.recipient, swap.amountOut);
 
         emit SwapClaimed(swapId, secret);
     }
 
-    /// @notice Refund a swap after timelock expires
+    /// @notice Refund a swap after timelock expires - swaps WBTC back to USDC before refunding
+    /// @dev No slippage protection on refund to prevent permanent fund locking if price moves during timelock
     /// @param swapId The swap identifier
     function refundSwap(bytes32 swapId) external nonReentrant {
         Swap storage swap = swaps[swapId];
@@ -184,10 +192,25 @@ contract AtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
 
         swap.state = SwapState.REFUNDED;
 
-        // Return tokens to sender
-        IERC20(swap.tokenIn).safeTransfer(swap.sender, swap.amountIn);
+        // Approve Uniswap router to spend WBTC
+        IERC20(swap.tokenOut).forceApprove(address(swapRouter), swap.amountOut);
 
-        emit SwapRefunded(swapId);
+        // Execute Uniswap swap: WBTC -> USDC
+        // Note: amountOutMinimum = 0 to prevent permanent fund locking if price drops during timelock
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+            tokenIn: swap.tokenOut,
+            tokenOut: swap.tokenIn,
+            fee: swap.poolFee,
+            recipient: swap.sender, // Sender receives USDC directly
+            deadline: block.timestamp,
+            amountIn: swap.amountOut,
+            amountOutMinimum: 0, // No slippage protection - accept any amount rather than risk losing funds
+            sqrtPriceLimitX96: 0
+        });
+
+        uint256 usdcRefunded = swapRouter.exactInputSingle(params);
+
+        emit SwapRefunded(swapId, usdcRefunded);
     }
 
     /// @notice Get swap details
