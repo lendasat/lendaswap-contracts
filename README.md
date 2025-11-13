@@ -191,6 +191,11 @@ See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for imp
 
 ### Polygon Mainnet
 
+- HTLC:
+  - [0x5cead362b83bf96795d48e1c4ba9fda80920ce21](https://polygonscan.com/address/0x5cead362b83bf96795d48e1c4ba9fda80920ce21)
+- Reverse HTLC:
+  - [0xc4827aF7Ba7A78Ff58d7988A84D455eDdcfb528F](https://polygonscan.com/address/0xc4827aF7Ba7A78Ff58d7988A84D455eDdcfb528F)
+
 - WBTC: `0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6`
 - USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
 - USDT0: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
