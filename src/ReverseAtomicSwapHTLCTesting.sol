@@ -44,6 +44,7 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     );
     event SwapClaimed(bytes32 indexed swapId, bytes32 secret);
     event SwapRefunded(bytes32 indexed swapId, uint256 usdcRefunded);
+    event TokensRecovered(address indexed token, address indexed recipient, uint256 amount);
 
     // Swap states
     enum SwapState {
@@ -223,7 +224,28 @@ contract ReverseAtomicSwapHTLC is ERC2771Context, Ownable, ReentrancyGuard {
     function isSwapOpen(bytes32 swapId) external view returns (bool) {
         return swaps[swapId].state == SwapState.OPEN;
     }
-    
+
+    /// @notice Emergency function to recover ERC20 tokens from the contract
+    /// @dev Can recover ANY tokens including those locked in active swaps
+    /// WARNING: This is an emergency function. Recovering tokens from active swaps
+    /// will break those swaps and affect users. Use with extreme caution.
+    /// @param token The ERC20 token address to recover
+    /// @param recipient The address to send recovered tokens to
+    /// @param amount The amount of tokens to recover
+    function recoverTokens(
+        address token,
+        address recipient,
+        uint256 amount
+    ) external onlyOwner nonReentrant {
+        require(token != address(0), "Invalid token address");
+        require(recipient != address(0), "Invalid recipient address");
+        require(amount > 0, "Amount must be greater than 0");
+
+        IERC20(token).safeTransfer(recipient, amount);
+
+        emit TokensRecovered(token, recipient, amount);
+    }
+
     /// @notice Override for ERC-2771 context
     function _msgSender() internal view override(Context, ERC2771Context) returns (address) {
         return ERC2771Context._msgSender();

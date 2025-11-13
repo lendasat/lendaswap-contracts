@@ -1,6 +1,7 @@
 # Lendaswap Atomic Swap Smart Contracts
 
-Smart contracts for atomic swaps between Bitcoin (via Arkade) and Polygon tokens using Hash Time Locked Contracts (HTLCs).
+Smart contracts for atomic swaps between Bitcoin (via Lightning or Arkade) and Polygon tokens using Hash Time Locked
+Contracts (HTLCs).
 
 ## Features
 
@@ -9,23 +10,36 @@ Smart contracts for atomic swaps between Bitcoin (via Arkade) and Polygon tokens
 - **Gasless Transactions**: ERC-2771 meta-transaction support for gasless execution
 - **Security**: Built with OpenZeppelin contracts, ReentrancyGuard, and SafeERC20
 
-## Architecture
+## Contracts
 
-### AtomicSwapHTLC Contract
+### AtomicSwapHTLC
 
-The main contract that handles the swap lifecycle:
+**Purpose**: Convert Bitcoin to any Polygon token (e.g., Bitcoin → USDC)
 
-1. **Create Swap**: Lock tokens with a hash lock and timelock
-2. **Claim Swap**: Reveal secret → Execute Uniswap swap → Send tokens to recipient
-3. **Refund**: Return tokens to sender after timelock expires
+This contract locks WBTC tokens and swaps them to a desired token when claimed:
 
-#### Key Parameters
+1. **Create**: User locks WBTC with a hash lock and timelock
+2. **Claim**: Recipient reveals secret → WBTC is swapped to desired token (e.g., USDC) via Uniswap → Tokens sent to
+   recipient
+3. **Refund**: If not claimed, sender can recover their WBTC after timelock expires
+
+### ReverseAtomicSwapHTLC
+
+**Purpose**: Convert any Polygon token to Bitcoin (e.g., USDC → Bitcoin)
+
+This contract locks any token and swaps to WBTC when claimed:
+
+1. **Create**: User locks tokens (e.g., USDC) with a hash lock and timelock
+2. **Claim**: Recipient reveals secret → Tokens swapped to WBTC via Uniswap → WBTC sent to recipient
+3. **Refund**: If not claimed, sender can recover their tokens after timelock expires
+
+### Key Parameters
 
 - `swapId`: Unique identifier for the swap
-- `hashLock`: SHA-256 hash of the secret (shared with Bitcoin side)
+- `hashLock`: SHA-256 hash of the secret (shared between both chains)
 - `timelock`: Unix timestamp after which refund is possible
-- `tokenIn`: Token to lock (e.g., WBTC)
-- `tokenOut`: Token to receive after swap (e.g., USDC)
+- `tokenIn`: Token to lock
+- `tokenOut`: Token to receive after swap
 - `poolFee`: Uniswap V3 pool fee tier (500/3000/10000)
 
 ## Prerequisites
@@ -67,41 +81,20 @@ UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564  # Polygon
 Run all tests:
 
 ```bash
-source ~/.zshenv && forge test
-```
-
-Run with verbose output:
-
-```bash
-source ~/.zshenv && forge test -vv
+forge test
 ```
 
 Run specific test:
 
 ```bash
-source ~/.zshenv && forge test --match-test testClaimSwap -vvv
+forge test --match-test testClaimSwap -vvv
 ```
 
 Run with gas reporting:
 
 ```bash
-source ~/.zshenv && forge test --gas-report
+forge test --gas-report
 ```
-
-### Test Coverage
-
-**Solidity Tests** (Foundry):
-
-- ✅ Creating swaps with proper validation
-- ✅ Claiming swaps with correct secret
-- ✅ Rejecting claims with wrong secret
-- ✅ Refunding after timelock expiration
-- ✅ Preventing refunds before timelock
-- ✅ Preventing claims after timelock
-- ✅ Access control (only sender can refund)
-- ✅ Duplicate swap prevention
-- ✅ Event emissions
-- ✅ ERC-2771 meta-transaction support
 
 ### E2E Rust Tests
 
@@ -114,20 +107,18 @@ cd tests
 
 The E2E test suite covers:
 
-- ✅ Local blockchain setup (Anvil)
-- ✅ Contract deployment
-- ✅ Complete swap lifecycle (create → claim)
-- ✅ Uniswap integration
-- ✅ Token transfers
-
-See [`tests/README.md`](tests/README.md) for details.
+- Local blockchain setup (Anvil)
+- Contract deployment
+- Complete swap lifecycle (create → claim)
+- Uniswap integration
+- Token transfers
 
 ## Deployment
 
 ### Deploy to Polygon Testnet (Mumbai)
 
 ```bash
-source ~/.zshenv && forge script script/DeployHTLC.s.sol:DeployHTLC \
+forge script script/DeployHTLC.s.sol:DeployHTLC \
   --rpc-url $RPC_URL \
   --broadcast \
   --verify
@@ -136,7 +127,7 @@ source ~/.zshenv && forge script script/DeployHTLC.s.sol:DeployHTLC \
 ### Deploy to Polygon Mainnet
 
 ```bash
-source ~/.zshenv && forge script script/DeployHTLC.s.sol:DeployHTLC \
+forge script script/DeployHTLC.s.sol:DeployHTLC \
   --rpc-url $RPC_URL \
   --broadcast \
   --verify \
@@ -145,49 +136,11 @@ source ~/.zshenv && forge script script/DeployHTLC.s.sol:DeployHTLC \
 
 Deployment addresses will be saved to `deployments.json`.
 
-## Integration with Rust Backend
-
-After deployment, integrate with your Rust backend:
-
-1. Add contract ABIs to your Rust project
-2. Use `alloy-rs` to interact with the contracts
-3. Coordinate the secret reveal between Bitcoin and Polygon sides
-
-### Example Rust Integration
-
-```rust
-use alloy::sol;
-
-// Generate contract bindings
-sol! {
-    #[sol(rpc)]
-    AtomicSwapHTLC,
-    "contracts/out/AtomicSwapHTLC.sol/AtomicSwapHTLC.json"
-}
-
-// Create a swap
-let secret = generate_random_bytes32();
-let hash_lock = sha256(&secret);
-let timelock = current_timestamp() + 3600; // 1 hour
-
-let tx = contract
-    .createSwap(
-        swap_id,
-        recipient,
-        wbtc_address,
-        usdc_address,
-        amount,
-        hash_lock,
-        timelock,
-        3000, // 0.3% pool fee
-    )
-    .send()
-    .await?;
-```
-
 ## Gasless Execution
 
-The contract supports **ERC-2771 meta-transactions** via the deployed `ERC2771Forwarder`. This allows users to claim swaps **without holding POL** for gas fees - perfect for your Bitcoin↔Polygon bridge where users shouldn't need to buy gas tokens.
+The contract supports **ERC-2771 meta-transactions** via the deployed `ERC2771Forwarder`. This allows users to claim
+swaps **without holding POL** for gas fees - perfect for your Bitcoin↔Polygon bridge where users shouldn't need to buy
+gas tokens.
 
 ### How It Works
 
@@ -212,32 +165,6 @@ This demonstrates the complete flow:
 - User receives tokens without spending any ETH/POL
 
 See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for implementation details.
-
-### Production Integration
-
-For production, integrate with a relayer service:
-
-**Option 1: Gelato Relay** (Recommended)
-
-- Hosted infrastructure for meta-transactions
-- Easy integration with API
-- Pay-per-transaction pricing
-- See [`tests/GELATO_INTEGRATION.md`](tests/GELATO_INTEGRATION.md) for complete guide
-
-**Option 2: OpenZeppelin Defender**
-
-- Alternative hosted relayer service
-- Similar capabilities to Gelato
-- Good for enterprises
-
-Both services support ERC-2771 and work with your deployed `ERC2771Forwarder`.
-
-### Benefits
-
-- ✅ **Better UX**: Users don't need POL tokens
-- ✅ **Lower barrier**: No need to explain gas to users
-- ✅ **Faster onboarding**: Users can claim immediately after Bitcoin confirmation
-- ✅ **Cost effective**: ~$0.01-0.05 per swap to sponsor gas
 
 ## Security Considerations
 
@@ -266,12 +193,7 @@ Both services support ERC-2771 and work with your deployed `ERC2771Forwarder`.
 
 - WBTC: `0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6`
 - USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
-- Uniswap V3 Router: `0xE592427A0AEce92De3Edee1F18E0157C05861564`
-
-### Mumbai Testnet
-
-- WBTC: Check Polygon docs
-- USDC: Check Polygon docs
+- USDT0: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
 - Uniswap V3 Router: `0xE592427A0AEce92De3Edee1F18E0157C05861564`
 
 ## License
