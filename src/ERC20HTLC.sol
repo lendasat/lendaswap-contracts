@@ -8,11 +8,14 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title ERC20HTLC - Hash Time Locked Contract for ERC20 Token Atomic Swaps
-/// @notice Enables atomic swaps for any ERC20 token (e.g., WBTC) without Uniswap integration
+/// @notice Enables atomic swaps for any ERC20 token (e.g., WBTC)
 /// @dev Uses ERC-2771 for meta-transactions (gasless execution) and HTLCs for atomic swaps
 /// @dev Can be used for both directions: BTC→ERC20 or ERC20→BTC
 contract ERC20HTLC is ERC2771Context, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    /// @notice Contract version for identification
+    string public constant VERSION = "1.0.0";
 
     // Events
     event SwapCreated(
