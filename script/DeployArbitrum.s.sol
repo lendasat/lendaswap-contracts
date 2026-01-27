@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import "../src/AtomicSwapHTLC.sol";
-import "../src/ReverseAtomicSwapHTLC.sol";
-import "../src/ERC20HTLC.sol";
+import {AtomicSwapHTLC} from "../src/AtomicSwapHTLC.sol";
+import {ReverseAtomicSwapHTLC} from "../src/ReverseAtomicSwapHTLC.sol";
+import {ERC20HTLC} from "../src/ERC20HTLC.sol";
 
 contract DeployArbitrum is Script {
     // Arbitrum Uniswap V3 SwapRouter
