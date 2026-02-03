@@ -221,4 +221,25 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
             "swap should no longer be active"
         );
     }
+
+    function test_lockThenThirdPartyRedeems_recipientReceives() public {
+        // 1. Alice locks WBTC directly in the HTLC with Bob as recipient
+        vm.startPrank(alice);
+        wbtc.approve(address(htlc), wbtcAmount);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
+        vm.stopPrank();
+
+        assertEq(wbtc.balanceOf(alice), 9e8, "alice should have 9 WBTC left");
+        assertEq(wbtc.balanceOf(bob), 0, "bob should have 0 WBTC");
+
+        // 2. Charlie (a third party) reveals the preimage — tokens go to Bob, not Charlie
+        address charlie = makeAddr("charlie");
+        vm.prank(charlie);
+        htlc.redeem(preimage, wbtcAmount, address(wbtc), alice, bob, timelock);
+
+        // Verify: Bob received the WBTC, Charlie got nothing
+        assertEq(wbtc.balanceOf(bob), wbtcAmount, "bob should have 1 WBTC");
+        assertEq(wbtc.balanceOf(charlie), 0, "charlie should have 0 WBTC");
+        assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
+    }
 }
