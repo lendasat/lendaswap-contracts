@@ -9,8 +9,8 @@ evm_version = "cancun"
 
 # Remappings
 remappings = [
-    "@openzeppelin/=lib/openzeppelin-contracts/",
-    "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/=lib/openzeppelin-contracts/",
+  "forge-std/=lib/forge-std/src/",
 ]
 
 # RPC endpoints for different networks
