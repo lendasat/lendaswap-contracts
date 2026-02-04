@@ -186,9 +186,13 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
-        // Bob signs EIP-712 redeem authorizing the coordinator
+        uint256 tooHighMinOut = usdcAmount + 1;
+
+        // Bob signs EIP-712 redeem authorizing the coordinator, with bob as destination
+        // Note: minAmountOut is bound to the signature, so Bob commits to tooHighMinOut
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), tooHighMinOut
         );
 
         // Bob redeems and swaps, but sets minAmountOut higher than DEX output
@@ -207,13 +211,12 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
             )
         });
 
-        uint256 tooHighMinOut = usdcAmount + 1;
-
         vm.prank(bob);
         vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), tooHighMinOut,
+            bob,
             v, r, s
         );
     }
@@ -340,7 +343,10 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         address token,
         address sender,
         uint256 _timelock,
-        address caller
+        address caller,
+        address destination,
+        address sweepToken,
+        uint256 minAmountOut
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -349,7 +355,8 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
                 keccak256(
                     abi.encode(
                         htlc.TYPEHASH_REDEEM(),
-                        _preimage, amount, token, sender, _timelock, caller
+                        _preimage, amount, token, sender, _timelock, caller,
+                        destination, sweepToken, minAmountOut
                     )
                 )
             )

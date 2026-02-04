@@ -384,9 +384,9 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
         .await?;
 
     let htlc_as_bob = HTLCErc20::new(htlc_address, &bob_provider);
-    // V2: redeem_0 uses msg.sender as claimAddress (bob = msg.sender = claimAddress)
+    // Direct redeem: msg.sender is used as claimAddress (bob = msg.sender = claimAddress)
     let redeem_receipt = htlc_as_bob
-        .redeem_0(
+        .redeem(
             preimage,
             wbtc_in_htlc,
             WBTC,

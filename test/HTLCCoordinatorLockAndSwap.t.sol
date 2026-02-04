@@ -113,9 +113,10 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
             "swap should be active"
         );
 
-        // 2. Bob signs HTLC-level EIP-712 sig authorizing the coordinator
+        // 2. Bob signs HTLC-level EIP-712 sig authorizing the coordinator, with bob as destination
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), expectedUsdc
         );
 
         // 3. Bob redeems via coordinator: redeem WBTC, swap WBTC -> USDC, sweep USDC to Bob
@@ -143,6 +144,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), expectedUsdc,
+            bob,
             v, r, s
         );
 
@@ -167,7 +169,8 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         //    address but the preimage hash won't match any swap
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, wrongPreimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+            bobPk, wrongPreimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), 0
         );
 
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
@@ -177,6 +180,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         coordinator.redeemAndExecute(
             wrongPreimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), 0,
+            bob,
             v, r, s
         );
 
@@ -237,7 +241,10 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         address token,
         address sender,
         uint256 _timelock,
-        address caller
+        address caller,
+        address destination,
+        address sweepToken,
+        uint256 minAmountOut
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -246,7 +253,8 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
                 keccak256(
                     abi.encode(
                         htlc.TYPEHASH_REDEEM(),
-                        _preimage, amount, token, sender, _timelock, caller
+                        _preimage, amount, token, sender, _timelock, caller,
+                        destination, sweepToken, minAmountOut
                     )
                 )
             )

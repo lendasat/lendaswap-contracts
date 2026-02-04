@@ -6,6 +6,8 @@ solc_version = "0.8.24"
 optimizer = true
 optimizer_runs = 200
 evm_version = "cancun"
+# needed to avoid stack too deep errors
+via_ir = true
 
 # Remappings
 remappings = [

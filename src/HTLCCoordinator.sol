@@ -29,7 +29,6 @@ contract HTLCCoordinator {
     error InsufficientBalance();
     error UnknownHTLC();
     error RefundCallsMismatch();
-    error InvalidClaimer();
     error Reentrancy();
 
     // -- Types --
@@ -141,20 +140,21 @@ contract HTLCCoordinator {
     }
 
     /// @notice Redeem tokens from an HTLC via EIP-712 signature, execute arbitrary
-    ///         calls, then sweep the resulting balance to the caller
+    ///         calls, then sweep the resulting balance to a signed destination
     /// @dev The claimAddress signs an HTLC-level EIP-712 message authorizing this
-    ///      coordinator as the caller. The coordinator verifies the recovered
-    ///      claimAddress matches msg.sender, ensuring only the claimAddress can
-    ///      trigger this flow. Front-running safe: the HTLC signature includes
-    ///      this coordinator's address, and the coordinator checks claimAddress == msg.sender.
+    ///      coordinator as the caller and binding the destination address. Anyone can
+    ///      submit the transaction, but the destination is cryptographically guaranteed
+    ///      by the claimAddress's signature. If a malicious submitter changes the
+    ///      destination, ecrecover returns the wrong address → swap key mismatch → revert.
     /// @param preimage     Secret that SHA-256 hashes to the HTLC's preimageHash
     /// @param amount       Token amount locked in the HTLC
     /// @param token        ERC20 token locked in the HTLC
     /// @param htlcSender   Address that created the HTLC
     /// @param timelock     Timelock set at HTLC creation
     /// @param calls        Arbitrary calls to execute after redeem (e.g. DEX swap)
-    /// @param sweepToken   Token to sweep to the caller (address(0) for ETH)
+    /// @param sweepToken   Token to sweep to the destination (address(0) for ETH)
     /// @param minAmountOut Minimum balance required before sweeping
+    /// @param destination  Address to receive swept tokens (signed by claimAddress)
     /// @param v            ECDSA recovery id (HTLC-level signature)
     /// @param r            ECDSA signature component (HTLC-level signature)
     /// @param s            ECDSA signature component (HTLC-level signature)
@@ -167,19 +167,19 @@ contract HTLCCoordinator {
         Call[] calldata calls,
         address sweepToken,
         uint256 minAmountOut,
+        address destination,
         uint8 v,
         bytes32 r,
         bytes32 s
     ) external nonReentrant {
-        // HTLC.redeem(sig) recovers claimAddress from the signature and sends tokens
-        // to msg.sender (this coordinator). The signature includes address(this) as caller.
-        address claimAddress = HTLC.redeem(preimage, amount, token, htlcSender, timelock, v, r, s);
-
-        // Only the claimAddress can call this — prevents front-running
-        if (claimAddress != msg.sender) revert InvalidClaimer();
+        // HTLC.redeemBySig recovers claimAddress from the signature and sends tokens
+        // to msg.sender (this coordinator). The signature includes address(this) as
+        // caller, destination, sweepToken, and minAmountOut — no separate claimAddress
+        // check needed, and execution parameters cannot be tampered with.
+        HTLC.redeemBySig(preimage, amount, token, htlcSender, timelock, destination, sweepToken, minAmountOut, v, r, s);
 
         _executeCalls(calls);
-        _sweep(msg.sender, sweepToken, minAmountOut);
+        _sweep(destination, sweepToken, minAmountOut);
     }
 
     /// @notice Refund an expired HTLC created via this coordinator, execute the

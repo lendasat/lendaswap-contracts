@@ -333,7 +333,7 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
     );
 
     let type_hash = keccak256(
-        "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller)",
+        "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut)",
     );
     let struct_hash = keccak256(
         (
@@ -343,7 +343,10 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
             WBTC,
             alice_address, // sender = Alice (created the lock)
             timelock,
-            coordinator_address, // caller = coordinator (will call HTLC.redeem)
+            coordinator_address, // caller = coordinator (will call HTLC.redeemBySig)
+            hub_address,         // destination = hub (sweep target)
+            USDC,                // sweepToken
+            U256::ZERO,          // minAmountOut (USDC went directly to Bob, not coordinator)
         )
             .abi_encode(),
     );
@@ -374,7 +377,8 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
             timelock,
             calls,
             USDC,
-            U256::ZERO, // minAmountOut = 0 (USDC went directly to Bob, not coordinator)
+            U256::ZERO,  // minAmountOut = 0 (USDC went directly to Bob, not coordinator)
+            hub_address, // destination = hub (sweep target)
             sig_v,
             sig_r,
             sig_s,
