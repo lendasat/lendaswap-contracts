@@ -38,7 +38,7 @@ contract HTLCErc20CreateAndRefundTest is Test {
     }
 
     function test_createAndRefund() public {
-        // 1. Alice creates an HTLC locking 1 WBTC for Bob
+        // 1. Alice creates an HTLC locking 1 WBTC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), amount);
         htlc.create(preimageHash, amount, address(wbtc), bob, timelock);

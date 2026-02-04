@@ -66,7 +66,10 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
     MockDEX dex;
 
     address alice = makeAddr("alice");
-    address bob = makeAddr("bob");
+
+    // Bob needs a known private key for EIP-712 signing
+    uint256 bobPk;
+    address bob;
 
     bytes32 preimage = bytes32(uint256(0xdeadbeef));
     bytes32 preimageHash;
@@ -81,6 +84,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         wbtc = new MockWBTC();
         dex = new MockDEX();
 
+        (bob, bobPk) = makeAddrAndKey("bob");
         preimageHash = sha256(abi.encodePacked(preimage));
         timelock = block.timestamp + 1 hours;
 
@@ -95,21 +99,26 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
     }
 
     function test_lockThenRedeemAndSwap() public {
-        // 1. Alice locks WBTC in the HTLC with the coordinator as recipient
+        // 1. Alice locks WBTC in the HTLC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), wbtcAmount);
-        htlc.create(preimageHash, wbtcAmount, address(wbtc), address(coordinator), timelock);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
         // Verify: WBTC moved from Alice to the HTLC
         assertEq(wbtc.balanceOf(alice), 9e8, "alice should have 9 WBTC left");
         assertEq(wbtc.balanceOf(address(htlc)), wbtcAmount, "htlc should hold 1 WBTC");
         assertTrue(
-            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, address(coordinator), timelock),
+            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, bob, timelock),
             "swap should be active"
         );
 
-        // 2. Bob redeems via coordinator: redeem WBTC, swap WBTC -> USDC, sweep USDC to Bob
+        // 2. Bob signs HTLC-level EIP-712 sig authorizing the coordinator
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+        );
+
+        // 3. Bob redeems via coordinator: redeem WBTC, swap WBTC -> USDC, sweep USDC to Bob
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
 
         calls[0] = HTLCCoordinator.Call({
@@ -132,14 +141,9 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
 
         vm.prank(bob);
         coordinator.redeemAndExecute(
-            preimage,
-            wbtcAmount,
-            address(wbtc),
-            alice,
-            timelock,
-            calls,
-            address(usdc),
-            expectedUsdc
+            preimage, wbtcAmount, address(wbtc), alice, timelock,
+            calls, address(usdc), expectedUsdc,
+            v, r, s
         );
 
         // Verify: Bob received USDC, HTLC is empty
@@ -147,49 +151,33 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
         assertEq(wbtc.balanceOf(address(coordinator)), 0, "coordinator should have no leftover WBTC");
         assertFalse(
-            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, address(coordinator), timelock),
+            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, bob, timelock),
             "swap should no longer be active"
         );
     }
 
     function test_lockThenRedeemWithInvalidPreimage_reverts() public {
-        // 1. Alice locks WBTC
+        // 1. Alice locks WBTC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), wbtcAmount);
-        htlc.create(preimageHash, wbtcAmount, address(wbtc), address(coordinator), timelock);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
-        // 2. Bob tries to redeem with wrong preimage
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
-        calls[0] = HTLCCoordinator.Call({
-            target: address(wbtc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), wbtcAmount))
-        });
-        calls[1] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(wbtc),
-                address(usdc),
-                wbtcAmount,
-                expectedUsdc
-            )
-        });
-
+        // 2. Bob tries to redeem with wrong preimage — signature will recover a valid
+        //    address but the preimage hash won't match any swap
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, wrongPreimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+        );
+
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+
         vm.prank(bob);
         vm.expectRevert(HTLCErc20.SwapNotFound.selector);
         coordinator.redeemAndExecute(
-            wrongPreimage,
-            wbtcAmount,
-            address(wbtc),
-            alice,
-            timelock,
-            calls,
-            address(usdc),
-            expectedUsdc
+            wrongPreimage, wbtcAmount, address(wbtc), alice, timelock,
+            calls, address(usdc), 0,
+            v, r, s
         );
 
         // Verify: WBTC still locked
@@ -198,10 +186,10 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
     }
 
     function test_lockThenRefund_wbtc() public {
-        // 1. Alice locks WBTC with coordinator as recipient
+        // 1. Alice locks WBTC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), wbtcAmount);
-        htlc.create(preimageHash, wbtcAmount, address(wbtc), address(coordinator), timelock);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
         assertEq(wbtc.balanceOf(alice), 9e8, "alice should have 9 WBTC left");
@@ -211,35 +199,58 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
 
         // 3. Alice refunds directly on the HTLC — gets her WBTC back
         vm.prank(alice);
-        htlc.refund(preimageHash, wbtcAmount, address(wbtc), address(coordinator), timelock);
+        htlc.refund(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
 
         // Verify: Alice got her WBTC back
         assertEq(wbtc.balanceOf(alice), 10e8, "alice should have all 10 WBTC back");
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
         assertFalse(
-            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, address(coordinator), timelock),
+            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, bob, timelock),
             "swap should no longer be active"
         );
     }
 
-    function test_lockThenThirdPartyRedeems_recipientReceives() public {
-        // 1. Alice locks WBTC directly in the HTLC with Bob as recipient
+    function test_lockThenNonClaimAddressRedeems_reverts() public {
+        // 1. Alice locks WBTC directly in the HTLC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), wbtcAmount);
         htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
-        assertEq(wbtc.balanceOf(alice), 9e8, "alice should have 9 WBTC left");
-        assertEq(wbtc.balanceOf(bob), 0, "bob should have 0 WBTC");
-
-        // 2. Charlie (a third party) reveals the preimage — tokens go to Bob, not Charlie
+        // 2. Charlie (not the claimAddress) tries to redeem — should fail
         address charlie = makeAddr("charlie");
         vm.prank(charlie);
-        htlc.redeem(preimage, wbtcAmount, address(wbtc), alice, bob, timelock);
+        vm.expectRevert(HTLCErc20.SwapNotFound.selector);
+        htlc.redeem(preimage, wbtcAmount, address(wbtc), alice, timelock);
 
-        // Verify: Bob received the WBTC, Charlie got nothing
-        assertEq(wbtc.balanceOf(bob), wbtcAmount, "bob should have 1 WBTC");
+        // Verify: WBTC still locked
         assertEq(wbtc.balanceOf(charlie), 0, "charlie should have 0 WBTC");
-        assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
+        assertEq(wbtc.balanceOf(address(htlc)), wbtcAmount, "htlc should still hold 1 WBTC");
+    }
+
+    // -- Helpers --
+
+    function _signHTLCRedeem(
+        uint256 pk,
+        bytes32 _preimage,
+        uint256 amount,
+        address token,
+        address sender,
+        uint256 _timelock,
+        address caller
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                htlc.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        htlc.TYPEHASH_REDEEM(),
+                        _preimage, amount, token, sender, _timelock, caller
+                    )
+                )
+            )
+        );
+        (v, r, s) = vm.sign(pk, digest);
     }
 }

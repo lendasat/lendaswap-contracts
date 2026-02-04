@@ -13,11 +13,12 @@
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::{Address, Bytes, FixedBytes, U160, U256, address};
+use alloy::primitives::{Address, Bytes, FixedBytes, U160, U256, address, keccak256};
 use alloy::providers::{Provider, ProviderBuilder};
+use alloy::signers::Signer;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
-use alloy::sol_types::SolCall;
+use alloy::sol_types::{SolCall, SolValue};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 
@@ -131,7 +132,7 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
     // Hub — deploys contracts and calls redeemAndExecute on behalf of Bob
     let hub_key: PrivateKeySigner = anvil.keys()[2].clone().into();
     let hub_address = hub_key.address();
-    let hub_wallet = EthereumWallet::from(hub_key);
+    let hub_wallet = EthereumWallet::from(hub_key.clone());
     let hub_provider = ProviderBuilder::new()
         .wallet(hub_wallet)
         .connect_http(endpoint.clone());
@@ -229,15 +230,15 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
         .get_receipt()
         .await?;
 
-    // Alice creates the HTLC: sender=Alice, recipient=coordinator
-    // Uses the 5-param create (sender = msg.sender = Alice)
+    // Alice creates the HTLC: sender=Alice, claimAddress=hub
+    // In V2, hub is the claimAddress (coordinator verifies claimAddress == msg.sender)
     let htlc_as_alice = HTLCErc20::new(htlc_address, &alice_provider);
     htlc_as_alice
         .create_1(
             preimage_hash,
             U256::from(WBTC_TEST_AMOUNT),
             WBTC,
-            coordinator_address, // recipient = coordinator (so it can redeem)
+            hub_address, // claimAddress = hub (hub calls redeemAndExecute)
             timelock,
         )
         .send()
@@ -252,13 +253,13 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
             preimage_hash,
             U256::from(WBTC_TEST_AMOUNT),
             WBTC,
-            alice_address,       // sender = Alice
-            coordinator_address, // recipient = coordinator
+            alice_address, // sender = Alice
+            hub_address,   // claimAddress = hub
             timelock,
         )
         .call()
         .await?;
-    println!("   isActive (sender=Alice, recipient=coordinator): {is_active}");
+    println!("   isActive (sender=Alice, claimAddress=hub): {is_active}");
     assert!(is_active, "HTLC should be active");
 
     let htlc_wbtc = IERC20::new(WBTC, &alice_provider)
@@ -317,7 +318,52 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
         },
     ];
 
-    // Hub calls redeemAndExecute
+    // EIP-712 signature: hub (claimAddress) authorizes coordinator (caller) to redeem
+    let chain_id = alice_provider.get_chain_id().await?;
+
+    let domain_separator = keccak256(
+        (
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256("HTLCErc20"),
+            keccak256("2"),
+            U256::from(chain_id),
+            htlc_address,
+        )
+            .abi_encode(),
+    );
+
+    let type_hash = keccak256(
+        "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller)",
+    );
+    let struct_hash = keccak256(
+        (
+            type_hash,
+            preimage,
+            U256::from(WBTC_TEST_AMOUNT),
+            WBTC,
+            alice_address, // sender = Alice (created the lock)
+            timelock,
+            coordinator_address, // caller = coordinator (will call HTLC.redeem)
+        )
+            .abi_encode(),
+    );
+
+    let digest = keccak256(
+        [
+            b"\x19\x01",
+            domain_separator.as_slice(),
+            struct_hash.as_slice(),
+        ]
+        .concat(),
+    );
+
+    let sig = hub_key.sign_hash(&digest).await?;
+    let sig_bytes = sig.as_bytes();
+    let sig_v = sig_bytes[64];
+    let sig_r = FixedBytes::<32>::from_slice(&sig_bytes[0..32]);
+    let sig_s = FixedBytes::<32>::from_slice(&sig_bytes[32..64]);
+
+    // Hub calls redeemAndExecute with EIP-712 signature
     let coordinator_as_hub = HTLCCoordinator::new(coordinator_address, &hub_provider);
     let receipt = coordinator_as_hub
         .redeemAndExecute(
@@ -329,6 +375,9 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
             calls,
             USDC,
             U256::ZERO, // minAmountOut = 0 (USDC went directly to Bob, not coordinator)
+            sig_v,
+            sig_r,
+            sig_s,
         )
         .send()
         .await?
@@ -386,7 +435,7 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
             U256::from(WBTC_TEST_AMOUNT),
             WBTC,
             alice_address,
-            coordinator_address,
+            hub_address, // claimAddress = hub
             timelock,
         )
         .call()

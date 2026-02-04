@@ -65,7 +65,10 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     MockDEX dex;
 
     address alice = makeAddr("alice");
-    address bob = makeAddr("bob");
+
+    // Bob needs a known private key for EIP-712 signing
+    uint256 bobPk;
+    address bob;
 
     bytes32 preimage = bytes32(uint256(0xdeadbeef));
     bytes32 preimageHash;
@@ -80,6 +83,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         wbtc = new MockWBTC();
         dex = new MockDEX();
 
+        (bob, bobPk) = makeAddrAndKey("bob");
         preimageHash = sha256(abi.encodePacked(preimage));
         timelock = block.timestamp + 1 hours;
 
@@ -115,7 +119,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         usdc.approve(address(coordinator), usdcAmount);
 
         vm.prank(relayer);
-        // overload 2: (calls, preimageHash, token, refundAddress, recipient, timelock)
+        // overload 2: (calls, preimageHash, token, refundAddress, claimAddress, timelock)
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), alice, bob, timelock);
 
         // Verify: HTLC created with Alice as sender (refund address)
@@ -176,11 +180,16 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     }
 
     function test_redeemAndExecute_minAmountOut_reverts() public {
-        // Alice locks WBTC with coordinator as recipient
+        // Alice locks WBTC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), wbtcAmount);
-        htlc.create(preimageHash, wbtcAmount, address(wbtc), address(coordinator), timelock);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
+
+        // Bob signs EIP-712 redeem authorizing the coordinator
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock, address(coordinator)
+        );
 
         // Bob redeems and swaps, but sets minAmountOut higher than DEX output
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
@@ -204,7 +213,8 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
-            calls, address(usdc), tooHighMinOut
+            calls, address(usdc), tooHighMinOut,
+            v, r, s
         );
     }
 
@@ -322,6 +332,30 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     // ---------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------
+
+    function _signHTLCRedeem(
+        uint256 pk,
+        bytes32 _preimage,
+        uint256 amount,
+        address token,
+        address sender,
+        uint256 _timelock,
+        address caller
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                htlc.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        htlc.TYPEHASH_REDEEM(),
+                        _preimage, amount, token, sender, _timelock, caller
+                    )
+                )
+            )
+        );
+        (v, r, s) = vm.sign(pk, digest);
+    }
 
     /// @dev Build the standard 3-call sequence: transferFrom, approve DEX, swap
     function _buildSwapCalls(

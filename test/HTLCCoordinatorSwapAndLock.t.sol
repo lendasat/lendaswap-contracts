@@ -127,7 +127,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
             )
         });
 
-        // 3. Alice creates the swap via the coordinator
+        // 3. Alice creates the swap via the coordinator (Bob is claimAddress)
         vm.prank(alice);
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
 
@@ -139,9 +139,9 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
             "swap should be active"
         );
 
-        // 4. Bob claims by revealing the preimage directly on the HTLC
+        // 4. Bob claims directly on the HTLC (msg.sender = claimAddress)
         vm.prank(bob);
-        htlc.redeem(preimage, expectedWbtc, address(wbtc), address(coordinator), bob, timelock);
+        htlc.redeem(preimage, expectedWbtc, address(wbtc), address(coordinator), timelock);
 
         // Verify: Bob received WBTC, HTLC is empty
         assertEq(wbtc.balanceOf(bob), expectedWbtc, "bob should have 1 WBTC");
@@ -187,7 +187,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
         vm.prank(bob);
         vm.expectRevert(HTLCErc20.SwapNotFound.selector);
-        htlc.redeem(wrongPreimage, expectedWbtc, address(wbtc), address(coordinator), bob, timelock);
+        htlc.redeem(wrongPreimage, expectedWbtc, address(wbtc), address(coordinator), timelock);
 
         // Verify: WBTC still locked
         assertEq(wbtc.balanceOf(bob), 0, "bob should still have 0 WBTC");

@@ -10,15 +10,17 @@ import {HTLCErc20} from "./HTLCErc20.sol";
 /// @dev Three primary flows:
 ///   1. executeAndCreate – run arbitrary calls (e.g. DEX swap), then lock the
 ///      resulting token balance in an HTLC.
-///   2. redeemAndExecute – redeem tokens from an HTLC, run arbitrary calls
-///      (e.g. DEX swap), then sweep the result to the caller.
+///   2. redeemAndExecute – redeem tokens from an HTLC via EIP-712 signature,
+///      run arbitrary calls (e.g. DEX swap), then sweep the result to the caller.
+///      Front-running safe: the HTLC-level signature binds to this coordinator as
+///      msg.sender, and the coordinator verifies claimAddress == msg.sender.
 ///   3. refundAndExecute – refund an expired HTLC (created via this coordinator),
 ///      run arbitrary calls (e.g. swap WBTC back to USDC), then sweep to the
 ///      original depositor.
 contract HTLCCoordinator {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 1;
+    uint8 public constant VERSION = 2;
 
     // -- Errors --
 
@@ -27,6 +29,7 @@ contract HTLCCoordinator {
     error InsufficientBalance();
     error UnknownHTLC();
     error RefundCallsMismatch();
+    error InvalidClaimer();
     error Reentrancy();
 
     // -- Types --
@@ -88,7 +91,7 @@ contract HTLCCoordinator {
     /// @param calls           Arbitrary calls to execute first (e.g. swap USDC -> WBTC)
     /// @param preimageHash    SHA-256 preimage hash for the HTLC
     /// @param token           ERC20 token to lock (must be the output of the calls)
-    /// @param recipient       Address that can redeem the HTLC with the preimage
+    /// @param claimAddress    Address authorized to redeem the HTLC
     /// @param timelock        Unix timestamp after which a refund is possible
     /// @param refundCallsHash keccak256(abi.encode(refundCalls)) — committed at creation,
     ///                        verified at refund. Use bytes32(0) to skip call verification
@@ -97,7 +100,7 @@ contract HTLCCoordinator {
         Call[] calldata calls,
         bytes32 preimageHash,
         address token,
-        address recipient,
+        address claimAddress,
         uint256 timelock,
         bytes32 refundCallsHash
     ) external payable nonReentrant {
@@ -107,9 +110,9 @@ contract HTLCCoordinator {
         if (balance == 0) revert InsufficientBalance();
 
         IERC20(token).forceApprove(address(HTLC), balance);
-        HTLC.create(preimageHash, balance, token, recipient, timelock);
+        HTLC.create(preimageHash, balance, token, claimAddress, timelock);
 
-        bytes32 key = HTLC.computeKey(preimageHash, balance, token, address(this), recipient, timelock);
+        bytes32 key = HTLC.computeKey(preimageHash, balance, token, address(this), claimAddress, timelock);
         deposits[key] = Deposit({depositor: msg.sender, refundCallsHash: refundCallsHash});
     }
 
@@ -123,24 +126,27 @@ contract HTLCCoordinator {
     /// @param preimageHash  SHA-256 preimage hash for the HTLC
     /// @param token         ERC20 token to lock (must be the output of the calls)
     /// @param refundAddress Address that can refund after timelock (the actual user)
-    /// @param recipient     Address that can redeem the HTLC with the preimage
+    /// @param claimAddress  Address authorized to redeem the HTLC
     /// @param timelock      Unix timestamp after which a refund is possible
     function executeAndCreate(
         Call[] calldata calls,
         bytes32 preimageHash,
         address token,
         address refundAddress,
-        address recipient,
+        address claimAddress,
         uint256 timelock
     ) external payable nonReentrant {
         _executeCalls(calls);
-        _createFromBalance(preimageHash, token, refundAddress, recipient, timelock);
+        _createFromBalance(preimageHash, token, refundAddress, claimAddress, timelock);
     }
 
-    /// @notice Redeem tokens from an HTLC, execute arbitrary calls, then sweep
-    ///         the resulting balance to the caller
-    /// @dev Example: redeem WBTC from an HTLC, swap WBTC -> USDC on Uniswap.
-    ///      The HTLC must have been created with this coordinator as the recipient.
+    /// @notice Redeem tokens from an HTLC via EIP-712 signature, execute arbitrary
+    ///         calls, then sweep the resulting balance to the caller
+    /// @dev The claimAddress signs an HTLC-level EIP-712 message authorizing this
+    ///      coordinator as the caller. The coordinator verifies the recovered
+    ///      claimAddress matches msg.sender, ensuring only the claimAddress can
+    ///      trigger this flow. Front-running safe: the HTLC signature includes
+    ///      this coordinator's address, and the coordinator checks claimAddress == msg.sender.
     /// @param preimage     Secret that SHA-256 hashes to the HTLC's preimageHash
     /// @param amount       Token amount locked in the HTLC
     /// @param token        ERC20 token locked in the HTLC
@@ -149,6 +155,9 @@ contract HTLCCoordinator {
     /// @param calls        Arbitrary calls to execute after redeem (e.g. DEX swap)
     /// @param sweepToken   Token to sweep to the caller (address(0) for ETH)
     /// @param minAmountOut Minimum balance required before sweeping
+    /// @param v            ECDSA recovery id (HTLC-level signature)
+    /// @param r            ECDSA signature component (HTLC-level signature)
+    /// @param s            ECDSA signature component (HTLC-level signature)
     function redeemAndExecute(
         bytes32 preimage,
         uint256 amount,
@@ -157,9 +166,18 @@ contract HTLCCoordinator {
         uint256 timelock,
         Call[] calldata calls,
         address sweepToken,
-        uint256 minAmountOut
+        uint256 minAmountOut,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external nonReentrant {
-        HTLC.redeem(preimage, amount, token, htlcSender, address(this), timelock);
+        // HTLC.redeem(sig) recovers claimAddress from the signature and sends tokens
+        // to msg.sender (this coordinator). The signature includes address(this) as caller.
+        address claimAddress = HTLC.redeem(preimage, amount, token, htlcSender, timelock, v, r, s);
+
+        // Only the claimAddress can call this — prevents front-running
+        if (claimAddress != msg.sender) revert InvalidClaimer();
+
         _executeCalls(calls);
         _sweep(msg.sender, sweepToken, minAmountOut);
     }
@@ -169,12 +187,10 @@ contract HTLCCoordinator {
     /// @dev Permissionless — anyone can trigger this after timelock expiry. The calls
     ///      must match the refundCallsHash committed at creation time. If refundCallsHash
     ///      was bytes32(0), calls must be empty (direct sweep only).
-    ///      Example: HTLC locked WBTC but the swap expired. Refund the WBTC,
-    ///      swap WBTC -> USDC on Uniswap, send USDC to the original depositor.
     /// @param preimageHash The preimage hash used at HTLC creation
     /// @param amount       Token amount locked in the HTLC
     /// @param token        ERC20 token locked in the HTLC
-    /// @param recipient    Recipient set at HTLC creation
+    /// @param claimAddress Claim address set at HTLC creation
     /// @param timelock     Timelock set at HTLC creation
     /// @param calls        Arbitrary calls to execute after refund — must hash to the
     ///                     committed refundCallsHash (empty if hash was bytes32(0))
@@ -184,13 +200,13 @@ contract HTLCCoordinator {
         bytes32 preimageHash,
         uint256 amount,
         address token,
-        address recipient,
+        address claimAddress,
         uint256 timelock,
         Call[] calldata calls,
         address sweepToken,
         uint256 minAmountOut
     ) external nonReentrant {
-        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), recipient, timelock);
+        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         Deposit memory deposit = deposits[key];
         if (deposit.depositor == address(0)) revert UnknownHTLC();
 
@@ -206,7 +222,7 @@ contract HTLCCoordinator {
 
         delete deposits[key];
 
-        HTLC.refund(preimageHash, amount, token, recipient, timelock);
+        HTLC.refund(preimageHash, amount, token, claimAddress, timelock);
 
         if (calls.length > 0) {
             _executeCalls(calls);
@@ -222,22 +238,22 @@ contract HTLCCoordinator {
     /// @param preimageHash The preimage hash used at HTLC creation
     /// @param amount       Token amount locked in the HTLC
     /// @param token        ERC20 token locked in the HTLC
-    /// @param recipient    Recipient set at HTLC creation
+    /// @param claimAddress Claim address set at HTLC creation
     /// @param timelock     Timelock set at HTLC creation
     function refundTo(
         bytes32 preimageHash,
         uint256 amount,
         address token,
-        address recipient,
+        address claimAddress,
         uint256 timelock
     ) external nonReentrant {
-        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), recipient, timelock);
+        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         Deposit memory deposit = deposits[key];
         if (deposit.depositor == address(0)) revert UnknownHTLC();
 
         delete deposits[key];
 
-        HTLC.refund(preimageHash, amount, token, recipient, timelock, deposit.depositor);
+        HTLC.refund(preimageHash, amount, token, claimAddress, timelock, deposit.depositor);
     }
 
     // -- Internal helpers --
@@ -246,14 +262,14 @@ contract HTLCCoordinator {
         bytes32 preimageHash,
         address token,
         address refundAddress,
-        address recipient,
+        address claimAddress,
         uint256 timelock
     ) internal {
         uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance == 0) revert InsufficientBalance();
 
         IERC20(token).forceApprove(address(HTLC), balance);
-        HTLC.create(preimageHash, balance, token, refundAddress, recipient, timelock);
+        HTLC.create(preimageHash, balance, token, refundAddress, claimAddress, timelock);
     }
 
     function _executeCalls(Call[] calldata calls) internal {

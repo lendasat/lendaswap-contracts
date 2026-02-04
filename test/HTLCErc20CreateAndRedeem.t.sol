@@ -15,7 +15,7 @@ contract MockWBTC is ERC20 {
     }
 }
 
-/// @notice E2E: user creates an HTLC with WBTC, other user redeems it
+/// @notice E2E: user creates an HTLC with WBTC, claimAddress redeems it
 contract HTLCErc20CreateAndRedeemTest is Test {
     HTLCErc20 htlc;
     MockWBTC wbtc;
@@ -39,7 +39,7 @@ contract HTLCErc20CreateAndRedeemTest is Test {
     }
 
     function test_createAndRedeem() public {
-        // 1. Alice creates an HTLC locking 1 WBTC for Bob
+        // 1. Alice creates an HTLC locking 1 WBTC with Bob as claimAddress
         vm.startPrank(alice);
         wbtc.approve(address(htlc), amount);
         htlc.create(preimageHash, amount, address(wbtc), bob, timelock);
@@ -53,11 +53,11 @@ contract HTLCErc20CreateAndRedeemTest is Test {
             "swap should be active"
         );
 
-        // 2. Bob redeems by revealing the preimage
+        // 2. Bob (claimAddress) redeems by revealing the preimage
         vm.prank(bob);
-        htlc.redeem(preimage, amount, address(wbtc), alice, bob, timelock);
+        htlc.redeem(preimage, amount, address(wbtc), alice, timelock);
 
-        // Verify: WBTC moved from HTLC to Bob
+        // Verify: WBTC moved from HTLC to Bob (msg.sender = claimAddress)
         assertEq(wbtc.balanceOf(bob), amount, "bob should have received 1 WBTC");
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
         assertFalse(
@@ -77,10 +77,28 @@ contract HTLCErc20CreateAndRedeemTest is Test {
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
         vm.prank(bob);
         vm.expectRevert(HTLCErc20.SwapNotFound.selector);
-        htlc.redeem(wrongPreimage, amount, address(wbtc), alice, bob, timelock);
+        htlc.redeem(wrongPreimage, amount, address(wbtc), alice, timelock);
 
         // Verify: nothing changed
         assertEq(wbtc.balanceOf(bob), 0, "bob should still have 0 WBTC");
+        assertEq(wbtc.balanceOf(address(htlc)), amount, "htlc should still hold 1 WBTC");
+    }
+
+    function test_redeemByNonClaimAddress_reverts() public {
+        // 1. Alice creates an HTLC with Bob as claimAddress
+        vm.startPrank(alice);
+        wbtc.approve(address(htlc), amount);
+        htlc.create(preimageHash, amount, address(wbtc), bob, timelock);
+        vm.stopPrank();
+
+        // 2. Charlie (not the claimAddress) tries to redeem — should fail
+        address charlie = makeAddr("charlie");
+        vm.prank(charlie);
+        vm.expectRevert(HTLCErc20.SwapNotFound.selector);
+        htlc.redeem(preimage, amount, address(wbtc), alice, timelock);
+
+        // Verify: nothing changed
+        assertEq(wbtc.balanceOf(charlie), 0, "charlie should have 0 WBTC");
         assertEq(wbtc.balanceOf(address(htlc)), amount, "htlc should still hold 1 WBTC");
     }
 }
