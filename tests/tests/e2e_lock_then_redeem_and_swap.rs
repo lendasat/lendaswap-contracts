@@ -1,11 +1,17 @@
 #![allow(clippy::too_many_arguments)]
 
-//! E2E test: Lock → Redeem-and-Swap
+//! E2E test: Lock → Redeem-and-Swap (Polygon fork + real Uniswap V3)
 //!
-//! Fork Polygon, deploy HTLCErc20 + HTLCCoordinator. Alice locks WBTC in the
-//! HTLC with recipient=coordinator. The hub calls `coordinator.redeemAndExecute`
-//! which redeems the WBTC, swaps WBTC→USDC via Uniswap V3 with recipient=Bob,
-//! so Bob receives the USDC even though the hub submitted the transaction.
+//! Tests `redeemAndExecute` against a **Polygon fork** with real on-chain
+//! liquidity (Uniswap V3 WBTC/USDC pool).
+//!
+//! Flow: Alice locks WBTC directly in the HTLC (claimAddress = Bob). The hub
+//! calls `coordinator.redeemAndExecute` with Bob's EIP-712 signature, which
+//! redeems the WBTC, swaps WBTC→USDC via Uniswap V3, and sweeps USDC to Bob.
+//! Bob receives USDC even though the hub submitted the transaction.
+//!
+//! This flow (`redeemAndExecute`) is only tested here — `e2e_coordinator.rs`
+//! does not cover it.
 //!
 //! Requires `POLYGON_RPC_URL` env var and network access.
 //! Run:

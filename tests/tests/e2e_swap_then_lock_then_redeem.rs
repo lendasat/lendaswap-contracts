@@ -1,9 +1,15 @@
 #![allow(clippy::too_many_arguments)]
 
-//! E2E test: Swap → Lock → Redeem
+//! E2E test: Swap → Lock → Redeem (Polygon fork + real Uniswap V3)
 //!
-//! Fork Polygon, deploy HTLCErc20 + HTLCCoordinator, swap USDC→WBTC via
-//! Uniswap V3 through `coordinator.executeAndCreate`, then Bob redeems.
+//! Tests `executeAndCreate` + direct `redeem` against a **Polygon fork** with
+//! real on-chain liquidity (Uniswap V3 USDC/WBTC pool).
+//!
+//! Flow: Alice swaps USDC→WBTC via `coordinator.executeAndCreate`, which locks
+//! the resulting WBTC in an HTLC. Bob then redeems by revealing the preimage.
+//!
+//! The same flow is also covered locally (with mock contracts) in
+//! `e2e_coordinator::test_lock_and_execute` + `test_claim`.
 //!
 //! Requires `POLYGON_RPC_URL` env var and network access.
 //! Run:
@@ -310,16 +316,8 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
     let coordinator_as_alice = HTLCCoordinator::new(coordinator_address, &alice_provider);
 
     // Alloy disambiguates overloaded functions with _0 / _1 suffixes.
-    // The first overload (with refundCallsHash) is executeAndCreate_0.
     let receipt = coordinator_as_alice
-        .executeAndCreate_0(
-            calls,
-            preimage_hash,
-            WBTC,
-            bob_address,
-            timelock,
-            FixedBytes::<32>::ZERO, // no committed refund calls
-        )
+        .executeAndCreate_1(calls, preimage_hash, WBTC, bob_address, timelock)
         .send()
         .await?
         .get_receipt()

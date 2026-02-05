@@ -28,7 +28,7 @@ contract HTLCCoordinator {
     error RestrictedTarget();
     error InsufficientBalance();
     error UnknownHTLC();
-    error RefundCallsMismatch();
+    error Unauthorized();
     error Reentrancy();
 
     // -- Types --
@@ -42,22 +42,15 @@ contract HTLCCoordinator {
         bytes callData;
     }
 
-    /// @param depositor       The original caller who created the HTLC via this coordinator
-    /// @param refundCallsHash keccak256 of the pre-committed refund calls (0 = no refund calls)
-    struct Deposit {
-        address depositor;
-        bytes32 refundCallsHash;
-    }
-
     // -- Immutables --
 
     HTLCErc20 public immutable HTLC;
 
     // -- Storage --
 
-    /// @dev Maps HTLC storage key -> deposit info for coordinator-created HTLCs.
-    ///      Populated by executeAndCreate (convenience), used by refundAndExecute.
-    mapping(bytes32 => Deposit) public deposits;
+    /// @dev Maps HTLC storage key -> original depositor address.
+    ///      Populated by executeAndCreate, used by refundAndExecute / refundTo.
+    mapping(bytes32 => address) public deposits;
 
     // -- Reentrancy guard via transient storage (EIP-1153) --
 
@@ -85,23 +78,18 @@ contract HTLCCoordinator {
 
     /// @notice Execute arbitrary calls then lock the resulting token balance in an HTLC
     /// @dev The coordinator becomes the HTLC sender. If the swap expires, anyone can
-    ///      call refundAndExecute with calls matching refundCallsHash to reclaim tokens
-    ///      and swap them back for the depositor.
-    /// @param calls           Arbitrary calls to execute first (e.g. swap USDC -> WBTC)
-    /// @param preimageHash    SHA-256 preimage hash for the HTLC
-    /// @param token           ERC20 token to lock (must be the output of the calls)
-    /// @param claimAddress    Address authorized to redeem the HTLC
-    /// @param timelock        Unix timestamp after which a refund is possible
-    /// @param refundCallsHash keccak256(abi.encode(refundCalls)) — committed at creation,
-    ///                        verified at refund. Use bytes32(0) to skip call verification
-    ///                        (refundAndExecute will only sweep without executing calls).
+    ///      call refundAndExecute or refundTo to reclaim tokens for the depositor.
+    /// @param calls        Arbitrary calls to execute first (e.g. swap USDC -> WBTC)
+    /// @param preimageHash SHA-256 preimage hash for the HTLC
+    /// @param token        ERC20 token to lock (must be the output of the calls)
+    /// @param claimAddress Address authorized to redeem the HTLC
+    /// @param timelock     Unix timestamp after which a refund is possible
     function executeAndCreate(
         Call[] calldata calls,
         bytes32 preimageHash,
         address token,
         address claimAddress,
-        uint256 timelock,
-        bytes32 refundCallsHash
+        uint256 timelock
     ) external payable nonReentrant {
         _executeCalls(calls);
 
@@ -112,7 +100,7 @@ contract HTLCCoordinator {
         HTLC.create(preimageHash, balance, token, claimAddress, timelock);
 
         bytes32 key = HTLC.computeKey(preimageHash, balance, token, address(this), claimAddress, timelock);
-        deposits[key] = Deposit({depositor: msg.sender, refundCallsHash: refundCallsHash});
+        deposits[key] = msg.sender;
     }
 
     /// @notice Execute arbitrary calls then lock the resulting token balance in an HTLC
@@ -182,18 +170,18 @@ contract HTLCCoordinator {
         _sweep(destination, sweepToken, minAmountOut);
     }
 
-    /// @notice Refund an expired HTLC created via this coordinator, execute the
-    ///         pre-committed calls, then sweep the result to the original depositor
-    /// @dev Permissionless — anyone can trigger this after timelock expiry. The calls
-    ///      must match the refundCallsHash committed at creation time. If refundCallsHash
-    ///      was bytes32(0), calls must be empty (direct sweep only).
+    /// @notice Refund an expired HTLC created via this coordinator, execute arbitrary
+    ///         calls (e.g. swap WBTC back to USDC), then sweep to the original depositor
+    /// @dev Restricted to the original depositor only. Arbitrary calls are executed
+    ///      with the coordinator as msg.sender, so only the depositor should control
+    ///      what calls are made (prevents token theft via malicious calls).
+    ///      For permissionless refund without calls, use refundTo instead.
     /// @param preimageHash The preimage hash used at HTLC creation
     /// @param amount       Token amount locked in the HTLC
     /// @param token        ERC20 token locked in the HTLC
     /// @param claimAddress Claim address set at HTLC creation
     /// @param timelock     Timelock set at HTLC creation
-    /// @param calls        Arbitrary calls to execute after refund — must hash to the
-    ///                     committed refundCallsHash (empty if hash was bytes32(0))
+    /// @param calls        Arbitrary calls to execute after refund (e.g. DEX swap-back)
     /// @param sweepToken   Token to sweep to the depositor (address(0) for ETH)
     /// @param minAmountOut Minimum balance required before sweeping
     function refundAndExecute(
@@ -207,18 +195,9 @@ contract HTLCCoordinator {
         uint256 minAmountOut
     ) external nonReentrant {
         bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
-        Deposit memory deposit = deposits[key];
-        if (deposit.depositor == address(0)) revert UnknownHTLC();
-
-        // Verify calls match the commitment made at creation
-        if (deposit.refundCallsHash == bytes32(0)) {
-            // No calls committed — only a direct sweep is allowed
-            if (calls.length != 0) revert RefundCallsMismatch();
-        } else {
-            if (keccak256(abi.encode(calls)) != deposit.refundCallsHash) {
-                revert RefundCallsMismatch();
-            }
-        }
+        address depositor = deposits[key];
+        if (depositor == address(0)) revert UnknownHTLC();
+        if (msg.sender != depositor) revert Unauthorized();
 
         delete deposits[key];
 
@@ -228,7 +207,7 @@ contract HTLCCoordinator {
             _executeCalls(calls);
         }
 
-        _sweep(deposit.depositor, sweepToken, minAmountOut);
+        _sweep(depositor, sweepToken, minAmountOut);
     }
 
     /// @notice Refund an expired coordinator-created HTLC and send the locked
@@ -248,12 +227,12 @@ contract HTLCCoordinator {
         uint256 timelock
     ) external nonReentrant {
         bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
-        Deposit memory deposit = deposits[key];
-        if (deposit.depositor == address(0)) revert UnknownHTLC();
+        address depositor = deposits[key];
+        if (depositor == address(0)) revert UnknownHTLC();
 
         delete deposits[key];
 
-        HTLC.refund(preimageHash, amount, token, claimAddress, timelock, deposit.depositor);
+        HTLC.refund(preimageHash, amount, token, claimAddress, timelock, depositor);
     }
 
     // -- Internal helpers --

@@ -150,7 +150,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(HTLCCoordinator.RestrictedTarget.selector);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
     function test_restrictedTarget_coordinator_reverts() public {
@@ -163,7 +163,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(HTLCCoordinator.RestrictedTarget.selector);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
     // ---------------------------------------------------------------
@@ -176,7 +176,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
     function test_redeemAndExecute_minAmountOut_reverts() public {
@@ -222,76 +222,6 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // RefundCallsMismatch
-    // ---------------------------------------------------------------
-
-    function test_refundAndExecute_mismatchedCalls_reverts() public {
-        // Create with committed refund calls
-        HTLCCoordinator.Call[] memory refundCalls = new HTLCCoordinator.Call[](1);
-        refundCalls[0] = HTLCCoordinator.Call({
-            target: address(wbtc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), wbtcAmount))
-        });
-        bytes32 refundCallsHash = keccak256(abi.encode(refundCalls));
-
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
-        HTLCCoordinator.Call[] memory createCalls = _buildSwapCalls(
-            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
-        );
-
-        vm.prank(alice);
-        coordinator.executeAndCreate(createCalls, preimageHash, address(wbtc), bob, timelock, refundCallsHash);
-
-        vm.warp(timelock + 1);
-
-        // Try to refund with different calls
-        HTLCCoordinator.Call[] memory wrongCalls = new HTLCCoordinator.Call[](1);
-        wrongCalls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-
-        vm.expectRevert(HTLCCoordinator.RefundCallsMismatch.selector);
-        coordinator.refundAndExecute(
-            preimageHash, wbtcAmount, address(wbtc), bob, timelock,
-            wrongCalls, address(wbtc), 0
-        );
-    }
-
-    function test_refundAndExecute_callsWhenNoneCommitted_reverts() public {
-        // Create with refundCallsHash = bytes32(0) (no calls committed)
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
-        HTLCCoordinator.Call[] memory createCalls = _buildSwapCalls(
-            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
-        );
-
-        vm.prank(alice);
-        coordinator.executeAndCreate(createCalls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
-
-        vm.warp(timelock + 1);
-
-        // Try to refund with calls even though none were committed
-        HTLCCoordinator.Call[] memory unexpectedCalls = new HTLCCoordinator.Call[](1);
-        unexpectedCalls[0] = HTLCCoordinator.Call({
-            target: address(wbtc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), wbtcAmount))
-        });
-
-        vm.expectRevert(HTLCCoordinator.RefundCallsMismatch.selector);
-        coordinator.refundAndExecute(
-            preimageHash, wbtcAmount, address(wbtc), bob, timelock,
-            unexpectedCalls, address(wbtc), 0
-        );
-    }
-
-    // ---------------------------------------------------------------
     // UnknownHTLC
     // ---------------------------------------------------------------
 
@@ -315,6 +245,89 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     }
 
     // ---------------------------------------------------------------
+    // Unauthorized (refundAndExecute restricted to depositor)
+    // ---------------------------------------------------------------
+
+    function test_refundAndExecute_nonDepositor_reverts() public {
+        // Alice creates the swap
+        vm.prank(alice);
+        usdc.approve(address(coordinator), usdcAmount);
+
+        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
+            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
+        );
+
+        vm.prank(alice);
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+
+        // Timelock expires
+        vm.warp(timelock + 1);
+
+        // Attacker builds malicious calls to steal the refunded tokens
+        HTLCCoordinator.Call[] memory maliciousCalls = new HTLCCoordinator.Call[](1);
+        address attacker = makeAddr("attacker");
+        maliciousCalls[0] = HTLCCoordinator.Call({
+            target: address(wbtc),
+            value: 0,
+            callData: abi.encodeCall(IERC20.transfer, (attacker, wbtcAmount))
+        });
+
+        // Attacker calls refundAndExecute — should be rejected
+        vm.prank(attacker);
+        vm.expectRevert(HTLCCoordinator.Unauthorized.selector);
+        coordinator.refundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock,
+            maliciousCalls, address(wbtc), 0
+        );
+
+        // Verify: WBTC still locked in HTLC (attacker couldn't steal)
+        assertEq(wbtc.balanceOf(address(htlc)), wbtcAmount, "htlc should still hold WBTC");
+        assertEq(wbtc.balanceOf(attacker), 0, "attacker should have 0 WBTC");
+    }
+
+    function test_refundAndExecute_depositorSucceeds() public {
+        // Alice creates the swap
+        vm.prank(alice);
+        usdc.approve(address(coordinator), usdcAmount);
+
+        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
+            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
+        );
+
+        vm.prank(alice);
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.warp(timelock + 1);
+
+        // Alice (depositor) triggers refundAndExecute — should succeed
+        HTLCCoordinator.Call[] memory refundCalls = new HTLCCoordinator.Call[](2);
+        refundCalls[0] = HTLCCoordinator.Call({
+            target: address(wbtc),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), wbtcAmount))
+        });
+        refundCalls[1] = HTLCCoordinator.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeWithSignature(
+                "swap(address,address,uint256,uint256)",
+                address(wbtc), address(usdc), wbtcAmount, usdcAmount
+            )
+        });
+
+        vm.prank(alice);
+        coordinator.refundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock,
+            refundCalls, address(usdc), usdcAmount
+        );
+
+        assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + usdcAmount, "alice should have USDC back");
+    }
+
+    // ---------------------------------------------------------------
     // CallFailed
     // ---------------------------------------------------------------
 
@@ -329,7 +342,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(HTLCCoordinator.CallFailed.selector, 0));
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
     // ---------------------------------------------------------------

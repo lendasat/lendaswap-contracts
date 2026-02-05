@@ -129,7 +129,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
 
         // 3. Alice creates the swap via the coordinator (Bob is claimAddress)
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
 
         // Verify: USDC left Alice, WBTC is locked in the HTLC
         assertEq(usdc.balanceOf(alice), 40_000e6, "alice should have 40k USDC left");
@@ -181,7 +181,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         });
 
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
 
         // 2. Bob tries to claim with the wrong preimage
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
@@ -216,9 +216,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
             )
         });
 
-        bytes32 refundCallsHash = keccak256(abi.encode(refundCalls));
-
-        // 2. Alice approves and creates the swap with committed refund calls
+        // 2. Alice approves and creates the swap
         vm.prank(alice);
         usdc.approve(address(coordinator), usdcAmount);
 
@@ -249,7 +247,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         });
 
         vm.prank(alice);
-        coordinator.executeAndCreate(createCalls, preimageHash, address(wbtc), bob, timelock, refundCallsHash);
+        coordinator.executeAndCreate(createCalls, preimageHash, address(wbtc), bob, timelock);
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
         assertEq(wbtc.balanceOf(address(htlc)), expectedWbtc, "htlc should hold 1 WBTC");
@@ -257,9 +255,8 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // 3. Bob never claims — timelock expires
         vm.warp(timelock + 1);
 
-        // 4. Anyone can trigger the refund — swap WBTC back to USDC for Alice
-        address charlie = makeAddr("charlie");
-        vm.prank(charlie);
+        // 4. Depositor triggers the refund — swap WBTC back to USDC
+        vm.prank(alice);
         coordinator.refundAndExecute(
             preimageHash,
             expectedWbtc,
@@ -308,7 +305,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         });
 
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock, bytes32(0));
+        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
 
         assertEq(wbtc.balanceOf(address(htlc)), expectedWbtc, "htlc should hold 1 WBTC");
         assertEq(wbtc.balanceOf(alice), 0, "alice should have 0 WBTC");
