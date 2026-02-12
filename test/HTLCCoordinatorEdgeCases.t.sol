@@ -149,7 +149,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         });
 
         vm.prank(alice);
-        vm.expectRevert(HTLCCoordinator.RestrictedTarget.selector);
+        vm.expectRevert("Coordinator: restricted target");
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
@@ -162,7 +162,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         });
 
         vm.prank(alice);
-        vm.expectRevert(HTLCCoordinator.RestrictedTarget.selector);
+        vm.expectRevert("Coordinator: restricted target");
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
@@ -175,7 +175,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(alice);
-        vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
+        vm.expectRevert("Coordinator: insufficient balance");
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 
@@ -212,7 +212,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         });
 
         vm.prank(bob);
-        vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
+        vm.expectRevert("Coordinator: insufficient balance");
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), tooHighMinOut,
@@ -230,7 +230,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.warp(timelock + 1);
 
-        vm.expectRevert(HTLCCoordinator.UnknownHTLC.selector);
+        vm.expectRevert("Coordinator: unknown HTLC");
         coordinator.refundAndExecute(
             preimageHash, wbtcAmount, address(wbtc), bob, timelock,
             emptyCalls, address(wbtc), 0
@@ -240,7 +240,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     function test_refundTo_unknownHTLC_reverts() public {
         vm.warp(timelock + 1);
 
-        vm.expectRevert(HTLCCoordinator.UnknownHTLC.selector);
+        vm.expectRevert("Coordinator: unknown HTLC");
         coordinator.refundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
     }
 
@@ -274,7 +274,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         // Attacker calls refundAndExecute — should be rejected
         vm.prank(attacker);
-        vm.expectRevert(HTLCCoordinator.Unauthorized.selector);
+        vm.expectRevert("Coordinator: unauthorized");
         coordinator.refundAndExecute(
             preimageHash, wbtcAmount, address(wbtc), bob, timelock,
             maliciousCalls, address(wbtc), 0
@@ -341,7 +341,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         });
 
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(HTLCCoordinator.CallFailed.selector, 0));
+        vm.expectRevert("Coordinator: call failed");
         coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
     }
 

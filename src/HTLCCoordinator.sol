@@ -24,11 +24,6 @@ contract HTLCCoordinator {
 
     // -- Errors --
 
-    error CallFailed(uint256 index);
-    error RestrictedTarget();
-    error InsufficientBalance();
-    error UnknownHTLC();
-    error Unauthorized();
     error Reentrancy();
 
     // -- Types --
@@ -94,7 +89,7 @@ contract HTLCCoordinator {
         _executeCalls(calls);
 
         uint256 balance = IERC20(token).balanceOf(address(this));
-        if (balance == 0) revert InsufficientBalance();
+        require(balance > 0, "Coordinator: insufficient balance");
 
         IERC20(token).forceApprove(address(HTLC), balance);
         HTLC.create(preimageHash, balance, token, claimAddress, timelock);
@@ -196,8 +191,8 @@ contract HTLCCoordinator {
     ) external nonReentrant {
         bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
-        if (depositor == address(0)) revert UnknownHTLC();
-        if (msg.sender != depositor) revert Unauthorized();
+        require(depositor != address(0), "Coordinator: unknown HTLC");
+        require(msg.sender == depositor, "Coordinator: unauthorized");
 
         delete deposits[key];
 
@@ -228,7 +223,7 @@ contract HTLCCoordinator {
     ) external nonReentrant {
         bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
-        if (depositor == address(0)) revert UnknownHTLC();
+        require(depositor != address(0), "Coordinator: unknown HTLC");
 
         delete deposits[key];
 
@@ -245,7 +240,7 @@ contract HTLCCoordinator {
         uint256 timelock
     ) internal {
         uint256 balance = IERC20(token).balanceOf(address(this));
-        if (balance == 0) revert InsufficientBalance();
+        require(balance > 0, "Coordinator: insufficient balance");
 
         IERC20(token).forceApprove(address(HTLC), balance);
         HTLC.create(preimageHash, balance, token, refundAddress, claimAddress, timelock);
@@ -258,7 +253,7 @@ contract HTLCCoordinator {
             _revertIfRestricted(c.target);
 
             (bool success,) = c.target.call{value: c.value}(c.callData);
-            if (!success) revert CallFailed(i);
+            if (!success) revert("Coordinator: call failed");
         }
     }
 
@@ -270,21 +265,19 @@ contract HTLCCoordinator {
             balance = IERC20(token).balanceOf(address(this));
         }
 
-        if (balance < minAmountOut) revert InsufficientBalance();
+        require(balance >= minAmountOut, "Coordinator: insufficient balance");
         if (balance == 0) return;
 
         if (token == address(0)) {
             (bool success,) = payable(destination).call{value: balance}("");
-            if (!success) revert CallFailed(type(uint256).max);
+            if (!success) revert("Coordinator: call failed");
         } else {
             IERC20(token).safeTransfer(destination, balance);
         }
     }
 
     function _revertIfRestricted(address target) internal view {
-        if (target == address(HTLC) || target == address(this)) {
-            revert RestrictedTarget();
-        }
+        require(target != address(HTLC) && target != address(this), "Coordinator: restricted target");
     }
 
     /// @dev Accept ETH (e.g. from Uniswap refunds or WETH unwrapping)

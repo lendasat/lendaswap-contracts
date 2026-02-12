@@ -34,12 +34,6 @@ contract HTLCErc20 {
 
     // -- Errors --
 
-    error ZeroAmount();
-    error TimelockTooSoon();
-    error TimelockNotExpired();
-    error SwapExists();
-    error SwapNotFound();
-    error InvalidPreimage();
     error Reentrancy();
 
     // -- State --
@@ -136,7 +130,7 @@ contract HTLCErc20 {
 
         // msg.sender is used as claimAddress — only the designated address can claim
         bytes32 key = _key(preimageHash, amount, token, sender, msg.sender, timelock);
-        if (!swaps[key]) revert SwapNotFound();
+        require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
 
@@ -191,7 +185,7 @@ contract HTLCErc20 {
         }
 
         bytes32 key = _key(preimageHash, amount, token, sender, claimAddress, timelock);
-        if (!swaps[key]) revert SwapNotFound();
+        require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
 
@@ -275,10 +269,10 @@ contract HTLCErc20 {
         address claimAddress,
         uint256 timelock
     ) internal {
-        if (block.timestamp < timelock) revert TimelockNotExpired();
+        require(block.timestamp >= timelock, "HTLC: timelock not expired");
 
         bytes32 key = _key(preimageHash, amount, token, msg.sender, claimAddress, timelock);
-        if (!swaps[key]) revert SwapNotFound();
+        require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
 
@@ -293,11 +287,11 @@ contract HTLCErc20 {
         address claimAddress,
         uint256 timelock
     ) internal {
-        if (amount == 0) revert ZeroAmount();
-        if (timelock <= block.timestamp) revert TimelockTooSoon();
+        require(amount > 0, "HTLC: zero amount");
+        require(timelock > block.timestamp, "HTLC: timelock too soon");
 
         bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
-        if (swaps[key]) revert SwapExists();
+        require(!swaps[key], "HTLC: swap exists");
 
         swaps[key] = true;
 

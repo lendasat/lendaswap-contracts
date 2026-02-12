@@ -176,7 +176,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(bob);
-        vm.expectRevert(HTLCErc20.SwapNotFound.selector);
+        vm.expectRevert("HTLC: swap not found");
         coordinator.redeemAndExecute(
             wrongPreimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), 0,
@@ -224,7 +224,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         // 2. Charlie (not the claimAddress) tries to redeem — should fail
         address charlie = makeAddr("charlie");
         vm.prank(charlie);
-        vm.expectRevert(HTLCErc20.SwapNotFound.selector);
+        vm.expectRevert("HTLC: swap not found");
         htlc.redeem(preimage, wbtcAmount, address(wbtc), alice, timelock);
 
         // Verify: WBTC still locked
