@@ -10,21 +10,28 @@
 //!
 //! 1. `test_lock_and_execute`    — `executeAndCreate`: swap USDC→WBTC via DEX, lock WBTC in HTLC
 //! 2. `test_claim`               — Bob redeems the HTLC with the preimage
-//! 3. `test_refund_and_execute`  — `refundAndExecute`: after timelock, depositor swaps WBTC back to USDC
-//! 4. `test_refund_to`           — `refundTo`: after timelock, anyone sends WBTC directly to depositor
+//! 3. `test_refund_and_execute`  — `refundAndExecute`: after timelock, depositor swaps WBTC back to
+//!    USDC
+//! 4. `test_refund_to`           — `refundTo`: after timelock, anyone sends WBTC directly to
+//!    depositor
 //!
 //! Run:
 //!   cargo test --test e2e_coordinator -- --nocapture
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::{Address, Bytes, FixedBytes, U256};
-use alloy::providers::{Provider, ProviderBuilder};
+use alloy::primitives::Address;
+use alloy::primitives::Bytes;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U256;
+use alloy::providers::Provider;
+use alloy::providers::ProviderBuilder;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use alloy::sol_types::SolCall;
 use anyhow::Result;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+use sha2::Sha256;
 
 // ---------------------------------------------------------------------------
 // Contract bindings

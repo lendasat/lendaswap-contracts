@@ -19,14 +19,23 @@
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::{Address, Bytes, FixedBytes, U160, U256, address, keccak256};
-use alloy::providers::{Provider, ProviderBuilder};
+use alloy::primitives::Address;
+use alloy::primitives::Bytes;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U160;
+use alloy::primitives::U256;
+use alloy::primitives::address;
+use alloy::primitives::keccak256;
+use alloy::providers::Provider;
+use alloy::providers::ProviderBuilder;
 use alloy::signers::Signer;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
-use alloy::sol_types::{SolCall, SolValue};
+use alloy::sol_types::SolCall;
+use alloy::sol_types::SolValue;
 use anyhow::Result;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+use sha2::Sha256;
 
 // ---------------------------------------------------------------------------
 // Contract bindings from forge build artifacts
@@ -275,8 +284,8 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
     println!("   WBTC locked in HTLC: {htlc_wbtc}");
 
     // -----------------------------------------------------------------------
-    // 4. Hub calls coordinator.redeemAndExecute on behalf of Bob
-    //    Coordinator redeems WBTC → swaps WBTC→USDC on Uniswap → USDC to Bob
+    // 4. Hub calls coordinator.redeemAndExecute on behalf of Bob Coordinator redeems WBTC → swaps
+    //    WBTC→USDC on Uniswap → USDC to Bob
     // -----------------------------------------------------------------------
     println!("\n4. Hub calling redeemAndExecute (funds → Bob) ...");
 

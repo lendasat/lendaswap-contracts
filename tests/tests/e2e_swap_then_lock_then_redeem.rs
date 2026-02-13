@@ -13,17 +13,25 @@
 //!
 //! Requires `POLYGON_RPC_URL` env var and network access.
 //! Run:
-//!   POLYGON_RPC_URL="..." cargo test --test e2e_swap_then_lock_then_redeem -- --ignored --nocapture
+//!   POLYGON_RPC_URL="..." cargo test --test e2e_swap_then_lock_then_redeem -- --ignored
+//! --nocapture
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
-use alloy::primitives::{Address, Bytes, FixedBytes, U160, U256, address};
-use alloy::providers::{Provider, ProviderBuilder};
+use alloy::primitives::Address;
+use alloy::primitives::Bytes;
+use alloy::primitives::FixedBytes;
+use alloy::primitives::U160;
+use alloy::primitives::U256;
+use alloy::primitives::address;
+use alloy::providers::Provider;
+use alloy::providers::ProviderBuilder;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use alloy::sol_types::SolCall;
 use anyhow::Result;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+use sha2::Sha256;
 
 // ---------------------------------------------------------------------------
 // Contract bindings from forge build artifacts
@@ -308,8 +316,8 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
     println!("   3 calls prepared (transferFrom, approve, exactInputSingle)");
 
     // -----------------------------------------------------------------------
-    // 5. Call coordinator.executeAndCreate(...)
-    //    First overload: (Call[], preimageHash, token, recipient, timelock, refundCallsHash)
+    // 5. Call coordinator.executeAndCreate(...) First overload: (Call[], preimageHash, token,
+    //    recipient, timelock, refundCallsHash)
     // -----------------------------------------------------------------------
     println!("\n5. Calling coordinator.executeAndCreate ...");
 
