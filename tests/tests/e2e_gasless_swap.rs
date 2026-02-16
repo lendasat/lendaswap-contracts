@@ -1,4 +1,3 @@
-#![allow(clippy::too_many_arguments)]
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;

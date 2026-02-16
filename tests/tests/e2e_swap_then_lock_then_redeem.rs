@@ -1,4 +1,3 @@
-#![allow(clippy::too_many_arguments)]
 
 //! E2E test: Swap → Lock → Redeem (Polygon fork + real Uniswap V3)
 //!

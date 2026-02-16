@@ -1,4 +1,3 @@
-#![allow(clippy::too_many_arguments)]
 
 //! End-to-end integration test that simulates the full lendaswap flow:
 //! 1. Deploy contracts (Forwarder and HTLC)
