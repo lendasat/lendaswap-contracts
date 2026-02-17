@@ -1,4 +1,3 @@
-
 //! E2E tests for the 4 core HTLCCoordinator flows using **local Anvil + mock
 //! contracts** (MockUSDC, MockWBTC, MockDEX). No network access required.
 //!

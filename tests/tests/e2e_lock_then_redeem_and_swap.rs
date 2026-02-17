@@ -1,4 +1,3 @@
-
 //! E2E test: Lock → Redeem-and-Swap (Polygon fork + real Uniswap V3)
 //!
 //! Tests `redeemAndExecute` against a **Polygon fork** with real on-chain

@@ -1,4 +1,3 @@
-
 //! End-to-end integration test that simulates the full lendaswap flow:
 //! 1. Deploy contracts (Forwarder and HTLC)
 //! 2. Create a swap (Alice locks WBTC with hash lock)
