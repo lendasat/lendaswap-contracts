@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 # Multi-chain HTLCCoordinator deployment using CREATE2 for deterministic addresses.
 #
+# Usage:
+#   ./deploy-multichain.sh              # deploy for real
+#   ./deploy-multichain.sh --dry-run    # simulate only (no broadcast)
+#
 # Additional optional env vars (beyond those in common.sh):
-#   MIN_BALANCE_WEI       - Minimum deployer balance in wei (default: 0.01 ETH)
 #   DEPLOY_SALT           - CREATE2 salt for deterministic addresses (default: 0x0)
 #                           Same salt + same bytecode + same deployer = same address on every chain.
 #                           Bump the salt if redeploying new versions to a fresh address.
+
+DRY_RUN=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=true
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTRACTS_DIR="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/common.sh"
 
 DEPLOY_SALT="${DEPLOY_SALT:-0x0000000000000000000000000000000000000000000000000000000000000000}"
-# 0.01 ETH / MATIC in wei
-MIN_BALANCE_WEI="${MIN_BALANCE_WEI:-10000000000000000}"
 
 # Check for forge
 if ! command -v forge &>/dev/null; then
@@ -24,7 +30,11 @@ fi
 # ─── Pre-flight checks ───────────────────────────────────────────────────────
 
 echo "============================================"
+if $DRY_RUN; then
+echo "  Multi-chain Deployment (DRY RUN)"
+else
 echo "  Multi-chain HTLCCoordinator Deployment"
+fi
 echo "============================================"
 echo ""
 echo "Deployer address: $DEPLOYER"
@@ -67,14 +77,13 @@ COORDINATOR_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$COORD
 echo "Predicted HTLCCoordinator address: $COORDINATOR_ADDRESS"
 echo ""
 
-# ─── Balance checks ──────────────────────────────────────────────────────────
+# ─── Balance & connectivity checks ───────────────────────────────────────────
+# For detailed gas estimates, run ./estimate-gas.sh first.
 
 echo "Checking balances on target chains..."
-echo "Minimum required: $(format_ether "$MIN_BALANCE_WEI") native tokens"
 echo ""
 
 DEPLOYABLE=()
-SKIPPED=()
 
 for i in "${!CHAINS[@]}"; do
   name="${CHAIN_NAMES[$i]}"
@@ -83,44 +92,25 @@ for i in "${!CHAINS[@]}"; do
 
   printf "  %-14s " "$name:"
 
-  # Check RPC connectivity
   if ! check_rpc "$i"; then
     echo "SKIP (RPC unreachable or wrong chain ID)"
-    SKIPPED+=("$i")
     continue
   fi
 
-  # Check balance
   balance=$(get_balance "$rpc" "$DEPLOYER")
   if [ -z "$balance" ]; then
     echo "SKIP (could not fetch balance)"
-    SKIPPED+=("$i")
     continue
   fi
 
-  balance_formatted=$(format_ether "$balance")
-
-  if [ "$(echo "$balance >= $MIN_BALANCE_WEI" | bc 2>/dev/null || python3 -c "print(1 if $balance >= $MIN_BALANCE_WEI else 0)")" = "1" ]; then
-    echo "${balance_formatted} $token - OK"
-    DEPLOYABLE+=("$i")
-  else
-    echo "${balance_formatted} $token - INSUFFICIENT"
-    SKIPPED+=("$i")
-  fi
+  echo "$(format_ether "$balance") $token"
+  DEPLOYABLE+=("$i")
 done
 
 echo ""
 
-if [ ${#SKIPPED[@]} -gt 0 ]; then
-  echo "Skipping chains with insufficient balance or connectivity issues:"
-  for i in "${SKIPPED[@]}"; do
-    echo "  - ${CHAIN_NAMES[$i]}"
-  done
-  echo ""
-fi
-
 if [ ${#DEPLOYABLE[@]} -eq 0 ]; then
-  echo "Error: No chains have sufficient balance for deployment."
+  echo "Error: No chains reachable."
   exit 1
 fi
 
@@ -148,13 +138,14 @@ for i in "${DEPLOYABLE[@]}"; do
   echo "Deploying to $name..."
   echo "────────────────────────────────────────────"
 
+  FORGE_ARGS=(script/DeployHTLCCoordinator.s.sol --rpc-url "$rpc" -vvv)
+  if ! $DRY_RUN; then
+    FORGE_ARGS+=(--broadcast --verify)
+  fi
+
   if (cd "$CONTRACTS_DIR" && \
       MNEMONIC="$MNEMONIC" DERIVATION_INDEX="$DERIVATION_INDEX" DEPLOY_SALT="$DEPLOY_SALT" \
-      forge script script/DeployHTLCCoordinator.s.sol \
-        --rpc-url "$rpc" \
-        --broadcast \
-        --verify \
-        -vvv); then
+      forge script "${FORGE_ARGS[@]}"); then
     echo ""
     echo "$name deployment: SUCCESS"
     RESULTS+=("$i")
@@ -184,14 +175,6 @@ if [ ${#FAILURES[@]} -gt 0 ]; then
   echo ""
   echo "Failed:"
   for i in "${FAILURES[@]}"; do
-    echo "  - ${CHAIN_NAMES[$i]}"
-  done
-fi
-
-if [ ${#SKIPPED[@]} -gt 0 ]; then
-  echo ""
-  echo "Skipped (insufficient balance/connectivity):"
-  for i in "${SKIPPED[@]}"; do
     echo "  - ${CHAIN_NAMES[$i]}"
   done
 fi
