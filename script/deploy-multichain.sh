@@ -11,6 +11,9 @@ set -euo pipefail
 # Optional env vars:
 #   DERIVATION_INDEX      - HD derivation index (default: 0)
 #   MIN_BALANCE_WEI       - Minimum deployer balance in wei (default: 0.01 ETH)
+#   DEPLOY_SALT           - CREATE2 salt for deterministic addresses (default: 0x0)
+#                           Same salt + same bytecode + same deployer = same address on every chain.
+#                           Bump the salt if redeploying new versions to a fresh address.
 
 MISSING=()
 [ -z "${MNEMONIC:-}" ] && MISSING+=("MNEMONIC")
@@ -27,6 +30,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
 fi
 
 DERIVATION_INDEX="${DERIVATION_INDEX:-0}"
+DEPLOY_SALT="${DEPLOY_SALT:-0x0000000000000000000000000000000000000000000000000000000000000000}"
 # 0.01 ETH / MATIC in wei
 MIN_BALANCE_WEI="${MIN_BALANCE_WEI:-10000000000000000}"
 
@@ -117,6 +121,36 @@ echo "Building contracts..."
 echo "Build successful."
 echo ""
 
+# ─── Predict CREATE2 addresses ─────────────────────────────────────────────
+echo "CREATE2 salt: $DEPLOY_SALT"
+
+# CREATE2 address = keccak256(0xff ++ deployer ++ salt ++ keccak256(initCode))[12:]
+compute_create2_address() {
+  local deployer="$1" salt="$2" initcode_hash="$3"
+  local packed="0xff${deployer#0x}${salt#0x}${initcode_hash#0x}"
+  local hash
+  hash=$(cast keccak "$packed")
+  # Last 20 bytes of the hash = last 40 hex chars
+  echo "0x${hash:26}"
+}
+
+# HTLCErc20 has no constructor args — init code is just the creation bytecode
+HTLC_INITCODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCErc20.sol/HTLCErc20.json")
+HTLC_INITCODE_HASH=$(cast keccak "$HTLC_INITCODE")
+HTLC_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$HTLC_INITCODE_HASH")
+
+echo "Predicted HTLCErc20 address:       $HTLC_ADDRESS"
+
+# HTLCCoordinator constructor arg is the HTLC address — ABI-encoded and appended to creation bytecode
+COORDINATOR_BYTECODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCCoordinator.sol/HTLCCoordinator.json")
+ENCODED_ARG=$(cast abi-encode "constructor(address)" "$HTLC_ADDRESS")
+COORDINATOR_INITCODE="${COORDINATOR_BYTECODE}${ENCODED_ARG#0x}"
+COORDINATOR_INITCODE_HASH=$(cast keccak "$COORDINATOR_INITCODE")
+COORDINATOR_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$COORDINATOR_INITCODE_HASH")
+
+echo "Predicted HTLCCoordinator address: $COORDINATOR_ADDRESS"
+echo ""
+
 # ─── Balance checks ──────────────────────────────────────────────────────────
 
 echo "Checking balances on target chains..."
@@ -197,7 +231,7 @@ for chain in "${DEPLOYABLE_CHAINS[@]}"; do
   echo "────────────────────────────────────────────"
 
   if (cd "$CONTRACTS_DIR" && \
-      MNEMONIC="$MNEMONIC" DERIVATION_INDEX="$DERIVATION_INDEX" \
+      MNEMONIC="$MNEMONIC" DERIVATION_INDEX="$DERIVATION_INDEX" DEPLOY_SALT="$DEPLOY_SALT" \
       forge script script/DeployHTLCCoordinator.s.sol \
         --rpc-url "$rpc" \
         --broadcast \

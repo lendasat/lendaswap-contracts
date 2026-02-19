@@ -17,12 +17,16 @@ contract DeployHTLCCoordinator is Script {
             deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         }
 
+        // CREATE2 salt for deterministic addresses across all chains.
+        // Same salt + same bytecode + same deployer = same address everywhere.
+        bytes32 salt = vm.envOr("DEPLOY_SALT", bytes32(0));
+
         vm.startBroadcast(deployerPrivateKey);
 
-        HTLCErc20 htlc = new HTLCErc20();
+        HTLCErc20 htlc = new HTLCErc20{salt: salt}();
         console.log("HTLCErc20 deployed at:", address(htlc));
 
-        HTLCCoordinator coordinator = new HTLCCoordinator(address(htlc));
+        HTLCCoordinator coordinator = new HTLCCoordinator{salt: salt}(address(htlc));
         console.log("HTLCCoordinator deployed at:", address(coordinator));
 
         vm.stopBroadcast();
