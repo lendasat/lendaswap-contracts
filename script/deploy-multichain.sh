@@ -1,94 +1,25 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-# ─── Configuration ───────────────────────────────────────────────────────────
-# Required env vars:
-#   MNEMONIC              - HD wallet mnemonic
-#   ETH_RPC_URL           - Ethereum RPC endpoint
-#   ARBITRUM_RPC_URL      - Arbitrum RPC endpoint
-#   POLYGON_RPC_URL       - Polygon RPC endpoint
+# Multi-chain HTLCCoordinator deployment using CREATE2 for deterministic addresses.
 #
-# Optional env vars:
-#   DERIVATION_INDEX      - HD derivation index (default: 0)
+# Additional optional env vars (beyond those in common.sh):
 #   MIN_BALANCE_WEI       - Minimum deployer balance in wei (default: 0.01 ETH)
 #   DEPLOY_SALT           - CREATE2 salt for deterministic addresses (default: 0x0)
 #                           Same salt + same bytecode + same deployer = same address on every chain.
 #                           Bump the salt if redeploying new versions to a fresh address.
 
-MISSING=()
-[ -z "${MNEMONIC:-}" ] && MISSING+=("MNEMONIC")
-[ -z "${ETH_RPC_URL:-}" ] && MISSING+=("ETH_RPC_URL")
-[ -z "${ARBITRUM_RPC_URL:-}" ] && MISSING+=("ARBITRUM_RPC_URL")
-[ -z "${POLYGON_RPC_URL:-}" ] && MISSING+=("POLYGON_RPC_URL")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONTRACTS_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/common.sh"
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo "Error: Missing required environment variables:"
-  for var in "${MISSING[@]}"; do
-    echo "  - $var"
-  done
-  exit 1
-fi
-
-DERIVATION_INDEX="${DERIVATION_INDEX:-0}"
 DEPLOY_SALT="${DEPLOY_SALT:-0x0000000000000000000000000000000000000000000000000000000000000000}"
 # 0.01 ETH / MATIC in wei
 MIN_BALANCE_WEI="${MIN_BALANCE_WEI:-10000000000000000}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTRACTS_DIR="$(dirname "$SCRIPT_DIR")"
-
-# ─── Chain definitions ───────────────────────────────────────────────────────
-declare -A RPC_URLS
-declare -A CHAIN_NAMES
-declare -A NATIVE_TOKENS
-declare -A CHAIN_IDS
-
-CHAINS=("ethereum" "arbitrum" "polygon")
-
-CHAIN_NAMES[ethereum]="Ethereum"
-CHAIN_NAMES[arbitrum]="Arbitrum One"
-CHAIN_NAMES[polygon]="Polygon"
-
-RPC_URLS[ethereum]="$ETH_RPC_URL"
-RPC_URLS[arbitrum]="$ARBITRUM_RPC_URL"
-RPC_URLS[polygon]="$POLYGON_RPC_URL"
-
-NATIVE_TOKENS[ethereum]="ETH"
-NATIVE_TOKENS[arbitrum]="ETH"
-NATIVE_TOKENS[polygon]="MATIC"
-
-CHAIN_IDS[ethereum]="1"
-CHAIN_IDS[arbitrum]="42161"
-CHAIN_IDS[polygon]="137"
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-get_deployer_address() {
-  cast wallet address --mnemonic "$MNEMONIC" --mnemonic-index "$DERIVATION_INDEX" 2>/dev/null
-}
-
-get_balance() {
-  local rpc_url="$1"
-  local address="$2"
-  cast balance "$address" --rpc-url "$rpc_url" 2>/dev/null
-}
-
-format_ether() {
-  cast from-wei "$1" 2>/dev/null
-}
-
-check_rpc() {
-  local chain="$1"
-  local rpc_url="${RPC_URLS[$chain]}"
-  local chain_id
-  chain_id=$(cast chain-id --rpc-url "$rpc_url" 2>/dev/null) || return 1
-
-  if [ "$chain_id" != "${CHAIN_IDS[$chain]}" ]; then
-    echo "Warning: ${CHAIN_NAMES[$chain]} RPC returned chain ID $chain_id, expected ${CHAIN_IDS[$chain]}"
-    return 1
-  fi
-  return 0
-}
+# Check for forge
+if ! command -v forge &>/dev/null; then
+  echo "Error: 'forge' not found. Install Foundry: https://getfoundry.sh"
+  exit 1
+fi
 
 # ─── Pre-flight checks ───────────────────────────────────────────────────────
 
@@ -96,21 +27,6 @@ echo "============================================"
 echo "  Multi-chain HTLCCoordinator Deployment"
 echo "============================================"
 echo ""
-
-# Check dependencies
-for cmd in forge cast; do
-  if ! command -v "$cmd" &>/dev/null; then
-    echo "Error: '$cmd' not found. Install Foundry: https://getfoundry.sh"
-    exit 1
-  fi
-done
-
-# Derive deployer address
-DEPLOYER=$(get_deployer_address)
-if [ -z "$DEPLOYER" ]; then
-  echo "Error: Failed to derive address from mnemonic"
-  exit 1
-fi
 echo "Deployer address: $DEPLOYER"
 echo "Derivation index: $DERIVATION_INDEX"
 echo ""
@@ -157,20 +73,20 @@ echo "Checking balances on target chains..."
 echo "Minimum required: $(format_ether "$MIN_BALANCE_WEI") native tokens"
 echo ""
 
-DEPLOYABLE_CHAINS=()
-SKIPPED_CHAINS=()
+DEPLOYABLE=()
+SKIPPED=()
 
-for chain in "${CHAINS[@]}"; do
-  name="${CHAIN_NAMES[$chain]}"
-  rpc="${RPC_URLS[$chain]}"
-  token="${NATIVE_TOKENS[$chain]}"
+for i in "${!CHAINS[@]}"; do
+  name="${CHAIN_NAMES[$i]}"
+  rpc="${CHAIN_RPCS[$i]}"
+  token="${CHAIN_TOKENS[$i]}"
 
   printf "  %-14s " "$name:"
 
   # Check RPC connectivity
-  if ! check_rpc "$chain"; then
+  if ! check_rpc "$i"; then
     echo "SKIP (RPC unreachable or wrong chain ID)"
-    SKIPPED_CHAINS+=("$chain")
+    SKIPPED+=("$i")
     continue
   fi
 
@@ -178,7 +94,7 @@ for chain in "${CHAINS[@]}"; do
   balance=$(get_balance "$rpc" "$DEPLOYER")
   if [ -z "$balance" ]; then
     echo "SKIP (could not fetch balance)"
-    SKIPPED_CHAINS+=("$chain")
+    SKIPPED+=("$i")
     continue
   fi
 
@@ -186,29 +102,31 @@ for chain in "${CHAINS[@]}"; do
 
   if [ "$(echo "$balance >= $MIN_BALANCE_WEI" | bc 2>/dev/null || python3 -c "print(1 if $balance >= $MIN_BALANCE_WEI else 0)")" = "1" ]; then
     echo "${balance_formatted} $token - OK"
-    DEPLOYABLE_CHAINS+=("$chain")
+    DEPLOYABLE+=("$i")
   else
     echo "${balance_formatted} $token - INSUFFICIENT"
-    SKIPPED_CHAINS+=("$chain")
+    SKIPPED+=("$i")
   fi
 done
 
 echo ""
 
-if [ ${#SKIPPED_CHAINS[@]} -gt 0 ]; then
+if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo "Skipping chains with insufficient balance or connectivity issues:"
-  for chain in "${SKIPPED_CHAINS[@]}"; do
-    echo "  - ${CHAIN_NAMES[$chain]}"
+  for i in "${SKIPPED[@]}"; do
+    echo "  - ${CHAIN_NAMES[$i]}"
   done
   echo ""
 fi
 
-if [ ${#DEPLOYABLE_CHAINS[@]} -eq 0 ]; then
+if [ ${#DEPLOYABLE[@]} -eq 0 ]; then
   echo "Error: No chains have sufficient balance for deployment."
   exit 1
 fi
 
-echo "Will deploy to: ${DEPLOYABLE_CHAINS[*]}"
+echo -n "Will deploy to:"
+for i in "${DEPLOYABLE[@]}"; do echo -n " ${CHAINS[$i]}"; done
+echo ""
 echo ""
 read -r -p "Proceed with deployment? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -222,9 +140,9 @@ echo ""
 RESULTS=()
 FAILURES=()
 
-for chain in "${DEPLOYABLE_CHAINS[@]}"; do
-  name="${CHAIN_NAMES[$chain]}"
-  rpc="${RPC_URLS[$chain]}"
+for i in "${DEPLOYABLE[@]}"; do
+  name="${CHAIN_NAMES[$i]}"
+  rpc="${CHAIN_RPCS[$i]}"
 
   echo "────────────────────────────────────────────"
   echo "Deploying to $name..."
@@ -239,11 +157,11 @@ for chain in "${DEPLOYABLE_CHAINS[@]}"; do
         -vvv); then
     echo ""
     echo "$name deployment: SUCCESS"
-    RESULTS+=("$chain")
+    RESULTS+=("$i")
   else
     echo ""
     echo "$name deployment: FAILED"
-    FAILURES+=("$chain")
+    FAILURES+=("$i")
   fi
   echo ""
 done
@@ -257,24 +175,24 @@ echo "============================================"
 if [ ${#RESULTS[@]} -gt 0 ]; then
   echo ""
   echo "Successful:"
-  for chain in "${RESULTS[@]}"; do
-    echo "  - ${CHAIN_NAMES[$chain]}"
+  for i in "${RESULTS[@]}"; do
+    echo "  - ${CHAIN_NAMES[$i]}"
   done
 fi
 
 if [ ${#FAILURES[@]} -gt 0 ]; then
   echo ""
   echo "Failed:"
-  for chain in "${FAILURES[@]}"; do
-    echo "  - ${CHAIN_NAMES[$chain]}"
+  for i in "${FAILURES[@]}"; do
+    echo "  - ${CHAIN_NAMES[$i]}"
   done
 fi
 
-if [ ${#SKIPPED_CHAINS[@]} -gt 0 ]; then
+if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo ""
   echo "Skipped (insufficient balance/connectivity):"
-  for chain in "${SKIPPED_CHAINS[@]}"; do
-    echo "  - ${CHAIN_NAMES[$chain]}"
+  for i in "${SKIPPED[@]}"; do
+    echo "  - ${CHAIN_NAMES[$i]}"
   done
 fi
 
