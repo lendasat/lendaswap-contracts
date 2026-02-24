@@ -13,6 +13,7 @@ via_ir = true
 remappings = [
   "@openzeppelin/=lib/openzeppelin-contracts/",
   "forge-std/=lib/forge-std/src/",
+  "permit2/=lib/permit2/src/",
 ]
 
 # RPC endpoints for different networks

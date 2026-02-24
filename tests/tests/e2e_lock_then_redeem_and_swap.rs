@@ -166,7 +166,7 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
     let htlc_address = *htlc.address();
     println!("   HTLCErc20 at {htlc_address} (deployed by hub)");
 
-    let coordinator = HTLCCoordinator::deploy(&hub_provider, htlc_address).await?;
+    let coordinator = HTLCCoordinator::deploy(&hub_provider, htlc_address, Address::ZERO).await?;
     let coordinator_address = *coordinator.address();
     println!("   HTLCCoordinator at {coordinator_address} (deployed by hub)");
 

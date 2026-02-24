@@ -78,7 +78,7 @@ contract HTLCFrontRunningProtectionTest is Test {
 
     function setUp() public {
         htlc = new HTLCErc20();
-        coordinator = new HTLCCoordinator(address(htlc));
+        coordinator = new HTLCCoordinator(address(htlc), address(0));
         wbtc = new MockWBTC();
         usdc = new MockUSDC();
         dex = new MockDEX();

@@ -75,7 +75,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
 
     function setUp() public {
         htlc = new HTLCErc20();
-        coordinator = new HTLCCoordinator(address(htlc));
+        coordinator = new HTLCCoordinator(address(htlc), address(0));
         usdc = new MockUSDC();
         wbtc = new MockWBTC();
         dex = new MockDEX();

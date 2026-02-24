@@ -208,7 +208,8 @@ async fn test_lock_and_execute() -> Result<()> {
     // -- 2. Deploy contracts --
     println!("\n2. Deploying contracts ...");
     let htlc = HTLCErc20::deploy(&deployer_provider).await?;
-    let coordinator = HTLCCoordinator::deploy(&deployer_provider, *htlc.address()).await?;
+    let coordinator =
+        HTLCCoordinator::deploy(&deployer_provider, *htlc.address(), Address::ZERO).await?;
     let usdc = MockUSDC::deploy(&deployer_provider).await?;
     let wbtc = MockWBTC::deploy(&deployer_provider).await?;
     let dex = MockDEX::deploy(&deployer_provider).await?;
@@ -385,7 +386,8 @@ async fn test_claim() -> Result<()> {
     // -- 2. Deploy contracts --
     println!("\n2. Deploying contracts ...");
     let htlc = HTLCErc20::deploy(&deployer_provider).await?;
-    let coordinator = HTLCCoordinator::deploy(&deployer_provider, *htlc.address()).await?;
+    let coordinator =
+        HTLCCoordinator::deploy(&deployer_provider, *htlc.address(), Address::ZERO).await?;
     let usdc = MockUSDC::deploy(&deployer_provider).await?;
     let wbtc = MockWBTC::deploy(&deployer_provider).await?;
     let dex = MockDEX::deploy(&deployer_provider).await?;
@@ -565,7 +567,8 @@ async fn test_refund_and_execute() -> Result<()> {
     // -- 2. Deploy contracts --
     println!("\n2. Deploying contracts ...");
     let htlc = HTLCErc20::deploy(&deployer_provider).await?;
-    let coordinator = HTLCCoordinator::deploy(&deployer_provider, *htlc.address()).await?;
+    let coordinator =
+        HTLCCoordinator::deploy(&deployer_provider, *htlc.address(), Address::ZERO).await?;
     let usdc = MockUSDC::deploy(&deployer_provider).await?;
     let wbtc = MockWBTC::deploy(&deployer_provider).await?;
     let dex = MockDEX::deploy(&deployer_provider).await?;
@@ -768,7 +771,8 @@ async fn test_refund_to() -> Result<()> {
 
     // Deploy
     let htlc = HTLCErc20::deploy(&deployer_provider).await?;
-    let coordinator = HTLCCoordinator::deploy(&deployer_provider, *htlc.address()).await?;
+    let coordinator =
+        HTLCCoordinator::deploy(&deployer_provider, *htlc.address(), Address::ZERO).await?;
     let usdc = MockUSDC::deploy(&deployer_provider).await?;
     let wbtc = MockWBTC::deploy(&deployer_provider).await?;
     let dex = MockDEX::deploy(&deployer_provider).await?;

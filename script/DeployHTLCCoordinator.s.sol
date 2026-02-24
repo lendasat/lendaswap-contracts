@@ -26,7 +26,10 @@ contract DeployHTLCCoordinator is Script {
         HTLCErc20 htlc = new HTLCErc20{salt: salt}();
         console.log("HTLCErc20 deployed at:", address(htlc));
 
-        HTLCCoordinator coordinator = new HTLCCoordinator{salt: salt}(address(htlc));
+        // Canonical Permit2 address (deployed via CREATE2 on all chains)
+        address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
+        HTLCCoordinator coordinator = new HTLCCoordinator{salt: salt}(address(htlc), permit2);
         console.log("HTLCCoordinator deployed at:", address(coordinator));
 
         vm.stopBroadcast();
