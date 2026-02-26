@@ -113,13 +113,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
             "swap should be active"
         );
 
-        // 2. Bob signs HTLC-level EIP-712 sig authorizing the coordinator, with bob as destination
-        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(usdc), expectedUsdc
-        );
-
-        // 3. Bob redeems via coordinator: redeem WBTC, swap WBTC -> USDC, sweep USDC to Bob
+        // 2. Build calls array first so we can compute callsHash for signing
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
 
         calls[0] = HTLCCoordinator.Call({
@@ -140,6 +134,15 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
             )
         });
 
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        // 3. Bob signs HTLC-level EIP-712 sig authorizing the coordinator, with bob as destination
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), expectedUsdc, callsHash
+        );
+
+        // 4. Bob redeems via coordinator: redeem WBTC, swap WBTC -> USDC, sweep USDC to Bob
         vm.prank(bob);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
@@ -168,12 +171,12 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         // 2. Bob tries to redeem with wrong preimage — signature will recover a valid
         //    address but the preimage hash won't match any swap
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
             bobPk, wrongPreimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(usdc), 0
+            address(coordinator), bob, address(usdc), 0, callsHash
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(bob);
         vm.expectRevert("HTLC: swap not found");
@@ -244,7 +247,8 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
         address caller,
         address destination,
         address sweepToken,
-        uint256 minAmountOut
+        uint256 minAmountOut,
+        bytes32 callsHash
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -254,11 +258,18 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
                     abi.encode(
                         htlc.TYPEHASH_REDEEM(),
                         _preimage, amount, token, sender, _timelock, caller,
-                        destination, sweepToken, minAmountOut
+                        destination, sweepToken, minAmountOut, callsHash
                     )
                 )
             )
         );
         (v, r, s) = vm.sign(pk, digest);
+    }
+
+    function _computeCallsHash(HTLCCoordinator.Call[] memory calls) internal pure returns (bytes32 callsHash) {
+        bytes memory callsData = abi.encode(calls);
+        assembly ("memory-safe") {
+            callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+        }
     }
 }

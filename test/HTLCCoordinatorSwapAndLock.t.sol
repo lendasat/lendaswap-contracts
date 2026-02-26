@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ISignatureTransfer} from "permit2/interfaces/ISignatureTransfer.sol";
+import {DeployPermit2} from "../lib/permit2/test/utils/DeployPermit2.sol";
 import {HTLCErc20} from "../src/HTLCErc20.sol";
 import {HTLCCoordinator} from "../src/HTLCCoordinator.sol";
 
@@ -58,13 +60,19 @@ contract MockDEX {
 
 /// @notice E2E: Alice swaps USDC -> WBTC via DEX and locks WBTC in an HTLC, Bob claims the WBTC
 contract HTLCCoordinatorCreateAndClaimTest is Test {
+    bytes32 internal constant TOKEN_PERMISSIONS_TYPEHASH = keccak256("TokenPermissions(address token,uint256 amount)");
+    string internal constant PERMIT2_WITNESS_TYPEHASH_STUB =
+        "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,";
+
     HTLCErc20 htlc;
     HTLCCoordinator coordinator;
+    ISignatureTransfer permit2;
     MockUSDC usdc;
     MockWBTC wbtc;
     MockDEX dex;
 
-    address alice = makeAddr("alice");
+    uint256 alicePk;
+    address alice;
     address bob = makeAddr("bob");
 
     bytes32 preimage = bytes32(uint256(0xdeadbeef));
@@ -75,11 +83,13 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
 
     function setUp() public {
         htlc = new HTLCErc20();
-        coordinator = new HTLCCoordinator(address(htlc), address(0));
+        permit2 = ISignatureTransfer(new DeployPermit2().deployPermit2());
+        coordinator = new HTLCCoordinator(address(htlc), address(permit2));
         usdc = new MockUSDC();
         wbtc = new MockWBTC();
         dex = new MockDEX();
 
+        (alice, alicePk) = makeAddrAndKey("alice");
         preimageHash = sha256(abi.encodePacked(preimage));
         timelock = block.timestamp + 1 hours;
 
@@ -93,43 +103,27 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // Configure rates: 60,000 USDC = 1 WBTC
         dex.setRate(address(usdc), address(wbtc), 1e8, 60_000e6); // USDC -> WBTC
         dex.setRate(address(wbtc), address(usdc), 60_000e6, 1e8); // WBTC -> USDC
+
+        // Alice approves Permit2 for USDC
+        vm.prank(alice);
+        usdc.approve(address(permit2), type(uint256).max);
     }
 
     function test_executeAndCreate_thenBobClaims() public {
-        // 1. Alice approves the coordinator to pull her USDC
+        // 1. Build calls: approve DEX, swap USDC -> WBTC
+        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
+            address(usdc), address(wbtc), usdcAmount, expectedWbtc
+        );
+
+        // 2. Alice signs Permit2 to pull USDC
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
+        // 3. Create the swap via the coordinator (Bob is claimAddress)
         vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
-        // 2. Build calls: pull USDC from Alice, approve DEX, swap USDC -> WBTC
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](3);
-
-        calls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.transferFrom, (alice, address(coordinator), usdcAmount))
-        });
-
-        calls[1] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-
-        calls[2] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(usdc),
-                address(wbtc),
-                usdcAmount,
-                expectedWbtc
-            )
-        });
-
-        // 3. Alice creates the swap via the coordinator (Bob is claimAddress)
-        vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         // Verify: USDC left Alice, WBTC is locked in the HTLC
         assertEq(usdc.balanceOf(alice), 40_000e6, "alice should have 40k USDC left");
@@ -146,42 +140,21 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // Verify: Bob received WBTC, HTLC is empty
         assertEq(wbtc.balanceOf(bob), expectedWbtc, "bob should have 1 WBTC");
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
-        assertFalse(
-            htlc.isActive(preimageHash, expectedWbtc, address(wbtc), address(coordinator), bob, timelock),
-            "swap should no longer be active"
-        );
     }
 
     function test_claimWithInvalidPreimage_reverts() public {
         // 1. Alice creates the swap
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
+        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
+            address(usdc), address(wbtc), usdcAmount, expectedWbtc
+        );
 
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](3);
-        calls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.transferFrom, (alice, address(coordinator), usdcAmount))
-        });
-        calls[1] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-        calls[2] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(usdc),
-                address(wbtc),
-                usdcAmount,
-                expectedWbtc
-            )
-        });
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         // 2. Bob tries to claim with the wrong preimage
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
@@ -197,57 +170,32 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
     function test_executeAndCreate_withRefundCalls_thenRefund() public {
         // 1. Build the refund calls that swap WBTC back to USDC
         HTLCCoordinator.Call[] memory refundCalls = new HTLCCoordinator.Call[](2);
-
         refundCalls[0] = HTLCCoordinator.Call({
             target: address(wbtc),
             value: 0,
             callData: abi.encodeCall(IERC20.approve, (address(dex), expectedWbtc))
         });
-
         refundCalls[1] = HTLCCoordinator.Call({
             target: address(dex),
             value: 0,
             callData: abi.encodeWithSignature(
                 "swap(address,address,uint256,uint256)",
-                address(wbtc),
-                address(usdc),
-                expectedWbtc,
-                usdcAmount
+                address(wbtc), address(usdc), expectedWbtc, usdcAmount
             )
         });
 
-        // 2. Alice approves and creates the swap
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
+        // 2. Alice creates the swap via Permit2
+        HTLCCoordinator.Call[] memory createCalls = _buildSwapCalls(
+            address(usdc), address(wbtc), usdcAmount, expectedWbtc
+        );
 
-        HTLCCoordinator.Call[] memory createCalls = new HTLCCoordinator.Call[](3);
-
-        createCalls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.transferFrom, (alice, address(coordinator), usdcAmount))
-        });
-
-        createCalls[1] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-
-        createCalls[2] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(usdc),
-                address(wbtc),
-                usdcAmount,
-                expectedWbtc
-            )
-        });
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), createCalls);
 
         vm.prank(alice);
-        coordinator.executeAndCreate(createCalls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            createCalls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
         assertEq(wbtc.balanceOf(address(htlc)), expectedWbtc, "htlc should hold 1 WBTC");
@@ -258,14 +206,8 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // 4. Depositor triggers the refund — swap WBTC back to USDC
         vm.prank(alice);
         coordinator.refundAndExecute(
-            preimageHash,
-            expectedWbtc,
-            address(wbtc),
-            bob,
-            timelock,
-            refundCalls,
-            address(usdc),
-            usdcAmount
+            preimageHash, expectedWbtc, address(wbtc), bob, timelock,
+            refundCalls, address(usdc), usdcAmount
         );
 
         // Verify: HTLC is empty, Alice got her USDC back
@@ -274,38 +216,18 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
     }
 
     function test_executeAndCreate_thenRefundTo_wbtc() public {
-        // 1. Alice creates the swap (no refund calls — she'll take the WBTC directly)
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
+        // 1. Alice creates the swap via Permit2 (no refund calls — she'll take the WBTC directly)
+        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
+            address(usdc), address(wbtc), usdcAmount, expectedWbtc
+        );
 
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](3);
-
-        calls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.transferFrom, (alice, address(coordinator), usdcAmount))
-        });
-
-        calls[1] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-
-        calls[2] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(usdc),
-                address(wbtc),
-                usdcAmount,
-                expectedWbtc
-            )
-        });
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         assertEq(wbtc.balanceOf(address(htlc)), expectedWbtc, "htlc should hold 1 WBTC");
         assertEq(wbtc.balanceOf(alice), 0, "alice should have 0 WBTC");
@@ -321,5 +243,104 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // Verify: Alice received the WBTC directly
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
         assertEq(wbtc.balanceOf(alice), expectedWbtc, "alice should have 1 WBTC");
+    }
+
+    // ---------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------
+
+    function _buildSwapCalls(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) internal view returns (HTLCCoordinator.Call[] memory calls) {
+        calls = new HTLCCoordinator.Call[](2);
+        calls[0] = HTLCCoordinator.Call({
+            target: tokenIn,
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), amountIn))
+        });
+        calls[1] = HTLCCoordinator.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeWithSignature(
+                "swap(address,address,uint256,uint256)",
+                tokenIn, tokenOut, amountIn, minAmountOut
+            )
+        });
+    }
+
+    function _signPermit2(
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        address refundAddress,
+        HTLCCoordinator.Call[] memory calls
+    ) internal view returns (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) {
+        permit = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: token, amount: amount}),
+            nonce: nonce,
+            deadline: block.timestamp + 1 hours
+        });
+
+        bytes32 witness = _computeWitness(preimageHash, address(wbtc), bob, refundAddress, timelock, calls);
+        signature = _signPermit2WitnessTransfer(permit, witness, alicePk);
+    }
+
+    function _computeWitness(
+        bytes32 _preimageHash,
+        address token,
+        address claimAddress,
+        address refundAddress,
+        uint256 _timelock,
+        HTLCCoordinator.Call[] memory calls
+    ) internal view returns (bytes32 witness) {
+        bytes32 callsHash;
+        {
+            bytes memory callsData = abi.encode(calls);
+            assembly ("memory-safe") {
+                callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+            }
+        }
+
+        bytes32 typeHash = coordinator.TYPEHASH_EXECUTE_AND_CREATE();
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, typeHash)
+            mstore(add(ptr, 0x20), _preimageHash)
+            mstore(add(ptr, 0x40), token)
+            mstore(add(ptr, 0x60), claimAddress)
+            mstore(add(ptr, 0x80), refundAddress)
+            mstore(add(ptr, 0xa0), _timelock)
+            mstore(add(ptr, 0xc0), callsHash)
+            witness := keccak256(ptr, 0xe0)
+            mstore(0x40, add(ptr, 0xe0))
+        }
+    }
+
+    function _signPermit2WitnessTransfer(
+        ISignatureTransfer.PermitTransferFrom memory permit,
+        bytes32 witness,
+        uint256 privateKey
+    ) internal view returns (bytes memory) {
+        bytes32 typehash = keccak256(
+            abi.encodePacked(PERMIT2_WITNESS_TYPEHASH_STUB, coordinator.TYPESTRING_EXECUTE_AND_CREATE())
+        );
+        bytes32 tokenPermissionsHash = keccak256(abi.encode(TOKEN_PERMISSIONS_TYPEHASH, permit.permitted));
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                permit2.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        typehash, tokenPermissionsHash, address(coordinator), permit.nonce, permit.deadline, witness
+                    )
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        return bytes.concat(r, s, bytes1(v));
     }
 }

@@ -81,57 +81,6 @@ contract HTLCCoordinator {
 
     // -- External functions --
 
-    /// @notice Execute arbitrary calls then lock the resulting token balance in an HTLC
-    /// @dev The coordinator becomes the HTLC sender. If the swap expires, anyone can
-    ///      call refundAndExecute or refundTo to reclaim tokens for the depositor.
-    /// @param calls        Arbitrary calls to execute first (e.g. swap USDC -> WBTC)
-    /// @param preimageHash SHA-256 preimage hash for the HTLC
-    /// @param token        ERC20 token to lock (must be the output of the calls)
-    /// @param claimAddress Address authorized to redeem the HTLC
-    /// @param timelock     Unix timestamp after which a refund is possible
-    function executeAndCreate(
-        Call[] calldata calls,
-        bytes32 preimageHash,
-        address token,
-        address claimAddress,
-        uint256 timelock
-    ) external payable nonReentrant {
-        _executeCalls(calls);
-
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        require(balance > 0, "Coordinator: insufficient balance");
-
-        IERC20(token).forceApprove(address(HTLC), balance);
-        HTLC.create(preimageHash, balance, token, claimAddress, timelock);
-
-        bytes32 key = HTLC.computeKey(preimageHash, balance, token, address(this), claimAddress, timelock);
-        deposits[key] = msg.sender;
-    }
-
-    /// @notice Execute arbitrary calls then lock the resulting token balance in an HTLC
-    ///         with an explicit refund address
-    /// @dev Enables sponsored swaps — a relayer/sponsor executes and pays gas, but
-    ///      the refund address is set to the actual user. The user can call
-    ///      HTLCErc20.refund directly if the swap expires.
-    ///      Cannot use refundAndExecute (user refunds directly).
-    /// @param calls         Arbitrary calls to execute first (e.g. DEX swap)
-    /// @param preimageHash  SHA-256 preimage hash for the HTLC
-    /// @param token         ERC20 token to lock (must be the output of the calls)
-    /// @param refundAddress Address that can refund after timelock (the actual user)
-    /// @param claimAddress  Address authorized to redeem the HTLC
-    /// @param timelock      Unix timestamp after which a refund is possible
-    function executeAndCreate(
-        Call[] calldata calls,
-        bytes32 preimageHash,
-        address token,
-        address refundAddress,
-        address claimAddress,
-        uint256 timelock
-    ) external payable nonReentrant {
-        _executeCalls(calls);
-        _createFromBalance(preimageHash, token, refundAddress, claimAddress, timelock);
-    }
-
     /// @notice Pull tokens from depositor via Permit2, execute arbitrary calls, then
     ///         lock the resulting balance in an HTLC with the coordinator as sender
     /// @dev The coordinator becomes the HTLC sender (depositor tracking enabled).
@@ -237,7 +186,8 @@ contract HTLCCoordinator {
         // to msg.sender (this coordinator). The signature includes address(this) as
         // caller, destination, sweepToken, and minAmountOut — no separate claimAddress
         // check needed, and execution parameters cannot be tampered with.
-        HTLC.redeemBySig(preimage, amount, token, htlcSender, timelock, destination, sweepToken, minAmountOut, v, r, s);
+        bytes32 callsHash = _computeCallsHash(calls);
+        HTLC.redeemBySig(preimage, amount, token, htlcSender, timelock, destination, sweepToken, minAmountOut, callsHash, v, r, s);
 
         _executeCalls(calls);
         _sweep(destination, sweepToken, minAmountOut);
@@ -329,6 +279,7 @@ contract HTLCCoordinator {
         for (uint256 i = 0; i < length; i++) {
             Call calldata c = calls[i];
             _revertIfRestricted(c.target);
+            _revertIfDangerousSelector(c.callData);
 
             (bool success,) = c.target.call{value: c.value}(c.callData);
             if (!success) revert("Coordinator: call failed");
@@ -398,6 +349,25 @@ contract HTLCCoordinator {
         bytes memory callsData = abi.encode(calls);
         assembly ("memory-safe") {
             callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+        }
+    }
+
+    /// @dev Defense-in-depth: block transferFrom-family selectors that could drain
+    ///      third-party approvals. Even though Permit2 is the primary token-pull
+    ///      mechanism, this prevents any residual risk from arbitrary call execution.
+    function _revertIfDangerousSelector(bytes calldata callData) internal pure {
+        if (callData.length >= 4) {
+            bytes4 selector = bytes4(callData[:4]);
+            // ERC-20/721 transferFrom
+            require(selector != bytes4(0x23b872dd), "Coordinator: transferFrom not allowed");
+            // ERC-721 safeTransferFrom(address,address,uint256)
+            require(selector != bytes4(0x42842e0e), "Coordinator: transferFrom not allowed");
+            // ERC-721 safeTransferFrom(address,address,uint256,bytes)
+            require(selector != bytes4(0xb88d4fde), "Coordinator: transferFrom not allowed");
+            // ERC-1155 safeTransferFrom
+            require(selector != bytes4(0xf242432a), "Coordinator: transferFrom not allowed");
+            // ERC-1155 safeBatchTransferFrom
+            require(selector != bytes4(0x2eb2c2d6), "Coordinator: transferFrom not allowed");
         }
     }
 

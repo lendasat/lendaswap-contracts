@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ISignatureTransfer} from "permit2/interfaces/ISignatureTransfer.sol";
+import {DeployPermit2} from "../lib/permit2/test/utils/DeployPermit2.sol";
 import {HTLCErc20} from "../src/HTLCErc20.sol";
 import {HTLCCoordinator} from "../src/HTLCCoordinator.sol";
 
@@ -58,13 +60,19 @@ contract MockDEX {
 
 /// @notice Edge-case and error-path tests for HTLCCoordinator
 contract HTLCCoordinatorEdgeCasesTest is Test {
+    bytes32 internal constant TOKEN_PERMISSIONS_TYPEHASH = keccak256("TokenPermissions(address token,uint256 amount)");
+    string internal constant PERMIT2_WITNESS_TYPEHASH_STUB =
+        "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,";
+
     HTLCErc20 htlc;
     HTLCCoordinator coordinator;
+    ISignatureTransfer permit2;
     MockUSDC usdc;
     MockWBTC wbtc;
     MockDEX dex;
 
-    address alice = makeAddr("alice");
+    uint256 alicePk;
+    address alice;
 
     // Bob needs a known private key for EIP-712 signing
     uint256 bobPk;
@@ -78,11 +86,13 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
     function setUp() public {
         htlc = new HTLCErc20();
-        coordinator = new HTLCCoordinator(address(htlc), address(0));
+        permit2 = ISignatureTransfer(new DeployPermit2().deployPermit2());
+        coordinator = new HTLCCoordinator(address(htlc), address(permit2));
         usdc = new MockUSDC();
         wbtc = new MockWBTC();
         dex = new MockDEX();
 
+        (alice, alicePk) = makeAddrAndKey("alice");
         (bob, bobPk) = makeAddrAndKey("bob");
         preimageHash = sha256(abi.encodePacked(preimage));
         timelock = block.timestamp + 1 hours;
@@ -98,29 +108,33 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         // Configure rates: 60,000 USDC = 1 WBTC
         dex.setRate(address(usdc), address(wbtc), 1e8, 60_000e6);
         dex.setRate(address(wbtc), address(usdc), 60_000e6, 1e8);
+
+        // Alice approves Permit2 for USDC and WBTC
+        vm.startPrank(alice);
+        usdc.approve(address(permit2), type(uint256).max);
+        wbtc.approve(address(permit2), type(uint256).max);
+        vm.stopPrank();
     }
 
     // ---------------------------------------------------------------
-    // executeAndCreate overload 2: explicit refundAddress
+    // executeAndCreateWithPermit2: explicit refundAddress
     // ---------------------------------------------------------------
 
     function test_executeAndCreate_explicitRefundAddress() public {
-        // Relayer executes on behalf of Alice — Alice is the refundAddress
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
         HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
-            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
+            address(usdc), address(wbtc), usdcAmount, wbtcAmount
         );
 
-        // Relayer calls with Alice as the refund address
-        address relayer = makeAddr("relayer");
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
+        // Sign with Alice as refundAddress (explicit refund variant)
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, alice, calls);
 
+        // Relayer submits on behalf of Alice
+        address relayer = makeAddr("relayer");
         vm.prank(relayer);
-        // overload 2: (calls, preimageHash, token, refundAddress, claimAddress, timelock)
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), alice, bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), alice, bob, timelock, permit, signature
+        );
 
         // Verify: HTLC created with Alice as sender (refund address)
         assertTrue(
@@ -148,9 +162,13 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
             callData: abi.encodeWithSignature("VERSION()")
         });
 
-        vm.prank(alice);
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.expectRevert("Coordinator: restricted target");
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
     }
 
     function test_restrictedTarget_coordinator_reverts() public {
@@ -161,9 +179,13 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
             callData: abi.encodeWithSignature("VERSION()")
         });
 
-        vm.prank(alice);
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.expectRevert("Coordinator: restricted target");
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
     }
 
     // ---------------------------------------------------------------
@@ -174,9 +196,14 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         // Calls that don't produce any WBTC for the coordinator
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
-        vm.prank(alice);
+        // Pull USDC but lock token is WBTC — no swap means zero WBTC balance
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.expectRevert("Coordinator: insufficient balance");
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
     }
 
     function test_redeemAndExecute_minAmountOut_reverts() public {
@@ -187,13 +214,6 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         vm.stopPrank();
 
         uint256 tooHighMinOut = usdcAmount + 1;
-
-        // Bob signs EIP-712 redeem authorizing the coordinator, with bob as destination
-        // Note: minAmountOut is bound to the signature, so Bob commits to tooHighMinOut
-        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(usdc), tooHighMinOut
-        );
 
         // Bob redeems and swaps, but sets minAmountOut higher than DEX output
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
@@ -210,6 +230,14 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
                 address(wbtc), address(usdc), wbtcAmount, usdcAmount
             )
         });
+
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        // Bob signs EIP-712 redeem authorizing the coordinator, with bob as destination
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), tooHighMinOut, callsHash
+        );
 
         vm.prank(bob);
         vm.expectRevert("Coordinator: insufficient balance");
@@ -249,16 +277,18 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     // ---------------------------------------------------------------
 
     function test_refundAndExecute_nonDepositor_reverts() public {
-        // Alice creates the swap
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
+        // Alice creates the swap via Permit2
         HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
-            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
+            address(usdc), address(wbtc), usdcAmount, wbtcAmount
         );
 
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         // Timelock expires
         vm.warp(timelock + 1);
@@ -286,16 +316,18 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     }
 
     function test_refundAndExecute_depositorSucceeds() public {
-        // Alice creates the swap
-        vm.prank(alice);
-        usdc.approve(address(coordinator), usdcAmount);
-
+        // Alice creates the swap via Permit2
         HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
-            address(usdc), address(wbtc), alice, usdcAmount, wbtcAmount
+            address(usdc), address(wbtc), usdcAmount, wbtcAmount
         );
 
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.prank(alice);
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
@@ -340,9 +372,34 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
             callData: abi.encodeWithSignature("nonExistentFunction()")
         });
 
-        vm.prank(alice);
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
         vm.expectRevert("Coordinator: call failed");
-        coordinator.executeAndCreate(calls, preimageHash, address(wbtc), bob, timelock);
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // transferFrom selector blocklist (defense-in-depth)
+    // ---------------------------------------------------------------
+
+    function test_transferFrom_in_calls_reverts() public {
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](1);
+        calls[0] = HTLCCoordinator.Call({
+            target: address(usdc),
+            value: 0,
+            callData: abi.encodeCall(IERC20.transferFrom, (alice, address(coordinator), usdcAmount))
+        });
+
+        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
+            _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
+
+        vm.expectRevert("Coordinator: transferFrom not allowed");
+        coordinator.executeAndCreateWithPermit2(
+            calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
+        );
     }
 
     // ---------------------------------------------------------------
@@ -359,7 +416,8 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         address caller,
         address destination,
         address sweepToken,
-        uint256 minAmountOut
+        uint256 minAmountOut,
+        bytes32 callsHash
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -369,7 +427,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
                     abi.encode(
                         htlc.TYPEHASH_REDEEM(),
                         _preimage, amount, token, sender, _timelock, caller,
-                        destination, sweepToken, minAmountOut
+                        destination, sweepToken, minAmountOut, callsHash
                     )
                 )
             )
@@ -377,29 +435,29 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (v, r, s) = vm.sign(pk, digest);
     }
 
-    /// @dev Build the standard 3-call sequence: transferFrom, approve DEX, swap
+    function _computeCallsHash(HTLCCoordinator.Call[] memory calls) internal pure returns (bytes32 callsHash) {
+        bytes memory callsData = abi.encode(calls);
+        assembly ("memory-safe") {
+            callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+        }
+    }
+
+    /// @dev Build the standard 2-call sequence: approve DEX, swap
     function _buildSwapCalls(
         address tokenIn,
         address tokenOut,
-        address from,
         uint256 amountIn,
         uint256 minAmountOut
     ) internal view returns (HTLCCoordinator.Call[] memory calls) {
-        calls = new HTLCCoordinator.Call[](3);
+        calls = new HTLCCoordinator.Call[](2);
 
         calls[0] = HTLCCoordinator.Call({
-            target: tokenIn,
-            value: 0,
-            callData: abi.encodeCall(IERC20.transferFrom, (from, address(coordinator), amountIn))
-        });
-
-        calls[1] = HTLCCoordinator.Call({
             target: tokenIn,
             value: 0,
             callData: abi.encodeCall(IERC20.approve, (address(dex), amountIn))
         });
 
-        calls[2] = HTLCCoordinator.Call({
+        calls[1] = HTLCCoordinator.Call({
             target: address(dex),
             value: 0,
             callData: abi.encodeWithSignature(
@@ -407,5 +465,78 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
                 tokenIn, tokenOut, amountIn, minAmountOut
             )
         });
+    }
+
+    function _signPermit2(
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        address refundAddress,
+        HTLCCoordinator.Call[] memory calls
+    ) internal view returns (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) {
+        permit = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: token, amount: amount}),
+            nonce: nonce,
+            deadline: block.timestamp + 1 hours
+        });
+
+        bytes32 witness = _computeWitness(preimageHash, address(wbtc), bob, refundAddress, timelock, calls);
+        signature = _signPermit2WitnessTransfer(permit, witness, alicePk);
+    }
+
+    function _computeWitness(
+        bytes32 _preimageHash,
+        address token,
+        address claimAddress,
+        address refundAddress,
+        uint256 _timelock,
+        HTLCCoordinator.Call[] memory calls
+    ) internal view returns (bytes32 witness) {
+        bytes32 callsHash;
+        {
+            bytes memory callsData = abi.encode(calls);
+            assembly ("memory-safe") {
+                callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+            }
+        }
+
+        bytes32 typeHash = coordinator.TYPEHASH_EXECUTE_AND_CREATE();
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, typeHash)
+            mstore(add(ptr, 0x20), _preimageHash)
+            mstore(add(ptr, 0x40), token)
+            mstore(add(ptr, 0x60), claimAddress)
+            mstore(add(ptr, 0x80), refundAddress)
+            mstore(add(ptr, 0xa0), _timelock)
+            mstore(add(ptr, 0xc0), callsHash)
+            witness := keccak256(ptr, 0xe0)
+            mstore(0x40, add(ptr, 0xe0))
+        }
+    }
+
+    function _signPermit2WitnessTransfer(
+        ISignatureTransfer.PermitTransferFrom memory permit,
+        bytes32 witness,
+        uint256 privateKey
+    ) internal view returns (bytes memory) {
+        bytes32 typehash = keccak256(
+            abi.encodePacked(PERMIT2_WITNESS_TYPEHASH_STUB, coordinator.TYPESTRING_EXECUTE_AND_CREATE())
+        );
+        bytes32 tokenPermissionsHash = keccak256(abi.encode(TOKEN_PERMISSIONS_TYPEHASH, permit.permitted));
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                permit2.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        typehash, tokenPermissionsHash, address(coordinator), permit.nonce, permit.deadline, witness
+                    )
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        return bytes.concat(r, s, bytes1(v));
     }
 }

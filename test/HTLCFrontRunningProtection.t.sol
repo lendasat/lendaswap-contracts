@@ -140,14 +140,16 @@ contract HTLCFrontRunningProtectionTest is Test {
         vm.stopPrank();
 
         // Bob signs for coordinator as the authorized caller, with bob as destination
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
             bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(0), 0
+            address(coordinator), bob, address(0), 0, callsHash
         );
 
         // Coordinator calls redeem — recovers Bob as claimAddress, tokens go to coordinator
         vm.prank(address(coordinator));
-        address recovered = htlc.redeemBySig(preimage, wbtcAmount, address(wbtc), alice, timelock, bob, address(0), 0, v, r, s);
+        address recovered = htlc.redeemBySig(preimage, wbtcAmount, address(wbtc), alice, timelock, bob, address(0), 0, callsHash, v, r, s);
 
         assertEq(recovered, bob, "recovered address should be bob");
         assertEq(wbtc.balanceOf(address(coordinator)), wbtcAmount, "coordinator should have 1 WBTC");
@@ -161,16 +163,18 @@ contract HTLCFrontRunningProtectionTest is Test {
         vm.stopPrank();
 
         // Bob signs for coordinator as the authorized caller, with bob as destination
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
             bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(0), 0
+            address(coordinator), bob, address(0), 0, callsHash
         );
 
         // Attacker replays the same signature but calls from their own address
         // ecrecover will recover a different address because msg.sender is different
         vm.prank(attacker);
         vm.expectRevert("HTLC: swap not found");
-        htlc.redeemBySig(preimage, wbtcAmount, address(wbtc), alice, timelock, bob, address(0), 0, v, r, s);
+        htlc.redeemBySig(preimage, wbtcAmount, address(wbtc), alice, timelock, bob, address(0), 0, callsHash, v, r, s);
 
         // WBTC still locked
         assertEq(wbtc.balanceOf(attacker), 0, "attacker should have 0 WBTC");
@@ -188,12 +192,6 @@ contract HTLCFrontRunningProtectionTest is Test {
         htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
-        // Bob signs EIP-712 authorizing coordinator, with bob as destination
-        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(usdc), usdcAmount
-        );
-
         // Bob calls coordinator — swap WBTC -> USDC
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
         calls[0] = HTLCCoordinator.Call({
@@ -209,6 +207,14 @@ contract HTLCFrontRunningProtectionTest is Test {
                 address(wbtc), address(usdc), wbtcAmount, usdcAmount
             )
         });
+
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        // Bob signs EIP-712 authorizing coordinator, with bob as destination
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), usdcAmount, callsHash
+        );
 
         vm.prank(bob);
         coordinator.redeemAndExecute(
@@ -229,16 +235,18 @@ contract HTLCFrontRunningProtectionTest is Test {
         htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
         // Bob signs EIP-712 authorizing coordinator with bob as destination
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
             bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(wbtc), 0
+            address(coordinator), bob, address(wbtc), 0, callsHash
         );
 
         // Attacker submits Bob's signature but changes destination to attacker.
         // Since destination is part of the signed EIP-712 message, ecrecover returns
         // a different address → swap key mismatch → revert.
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(attacker);
         vm.expectRevert("HTLC: swap not found");
@@ -261,15 +269,16 @@ contract HTLCFrontRunningProtectionTest is Test {
         htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
         vm.stopPrank();
 
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
         // Attacker creates their own signature (they know the preimage from mempool)
         // but they are not Bob — ecrecover will return attacker's address, not Bob's
         (, uint256 attackerPk) = makeAddrAndKey("attacker");
         (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
             attackerPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), attacker, address(wbtc), 0
+            address(coordinator), attacker, address(wbtc), 0, callsHash
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         // The HTLC key includes claimAddress = bob, but ecrecover returns attacker → key mismatch
         vm.prank(attacker);
@@ -302,13 +311,7 @@ contract HTLCFrontRunningProtectionTest is Test {
             "swap should be active"
         );
 
-        // 2. Bob signs EIP-712 authorizing coordinator, with bob as destination
-        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
-            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
-            address(coordinator), bob, address(usdc), usdcAmount
-        );
-
-        // 3. Bob calls coordinator to redeem and swap WBTC -> USDC
+        // 2. Build calls array first so we can compute callsHash for signing
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
         calls[0] = HTLCCoordinator.Call({
             target: address(wbtc),
@@ -324,6 +327,15 @@ contract HTLCFrontRunningProtectionTest is Test {
             )
         });
 
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        // 3. Bob signs EIP-712 authorizing coordinator, with bob as destination
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(usdc), usdcAmount, callsHash
+        );
+
+        // 4. Bob calls coordinator to redeem and swap WBTC -> USDC
         vm.prank(bob);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
@@ -342,6 +354,59 @@ contract HTLCFrontRunningProtectionTest is Test {
         );
     }
 
+    // ---------------------------------------------------------------
+    // callsHash binding: attacker substitutes calls → revert
+    // ---------------------------------------------------------------
+
+    function test_coordinatorRedeem_attackerSubstitutesCalls_reverts() public {
+        // Alice locks WBTC with Bob as claimAddress
+        vm.startPrank(alice);
+        wbtc.approve(address(htlc), wbtcAmount);
+        htlc.create(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
+        vm.stopPrank();
+
+        // Bob builds legitimate calls and signs over their hash
+        HTLCCoordinator.Call[] memory legitimateCalls = new HTLCCoordinator.Call[](2);
+        legitimateCalls[0] = HTLCCoordinator.Call({
+            target: address(wbtc),
+            value: 0,
+            callData: abi.encodeCall(IERC20.approve, (address(dex), wbtcAmount))
+        });
+        legitimateCalls[1] = HTLCCoordinator.Call({
+            target: address(dex),
+            value: 0,
+            callData: abi.encodeWithSignature(
+                "swap(address,address,uint256,uint256)",
+                address(wbtc), address(usdc), wbtcAmount, usdcAmount
+            )
+        });
+
+        bytes32 legitimateCallsHash = _computeCallsHash(legitimateCalls);
+
+        // Bob signs with the legitimate callsHash, minAmountOut = 0 (vulnerable without callsHash)
+        (uint8 v, bytes32 r, bytes32 s) = _signHTLCRedeem(
+            bobPk, preimage, wbtcAmount, address(wbtc), alice, timelock,
+            address(coordinator), bob, address(wbtc), 0, legitimateCallsHash
+        );
+
+        // Attacker intercepts the signature and submits with malicious calls
+        // (empty calls → WBTC stays on coordinator, but sweep goes to bob so no direct theft;
+        //  the key point is the callsHash mismatch causes revert)
+        HTLCCoordinator.Call[] memory maliciousCalls = new HTLCCoordinator.Call[](0);
+
+        vm.prank(bob);
+        vm.expectRevert("HTLC: swap not found");
+        coordinator.redeemAndExecute(
+            preimage, wbtcAmount, address(wbtc), alice, timelock,
+            maliciousCalls, address(wbtc), 0,
+            bob,
+            v, r, s
+        );
+
+        // WBTC still locked — callsHash binding prevented the substitution
+        assertEq(wbtc.balanceOf(address(htlc)), wbtcAmount, "htlc should still hold 1 WBTC");
+    }
+
     // -- Helpers --
 
     function _signHTLCRedeem(
@@ -354,7 +419,8 @@ contract HTLCFrontRunningProtectionTest is Test {
         address caller,
         address destination,
         address sweepToken,
-        uint256 minAmountOut
+        uint256 minAmountOut,
+        bytes32 callsHash
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -364,11 +430,18 @@ contract HTLCFrontRunningProtectionTest is Test {
                     abi.encode(
                         htlc.TYPEHASH_REDEEM(),
                         _preimage, amount, token, sender, _timelock, caller,
-                        destination, sweepToken, minAmountOut
+                        destination, sweepToken, minAmountOut, callsHash
                     )
                 )
             )
         );
         (v, r, s) = vm.sign(pk, digest);
+    }
+
+    function _computeCallsHash(HTLCCoordinator.Call[] memory calls) internal pure returns (bytes32 callsHash) {
+        bytes memory callsData = abi.encode(calls);
+        assembly ("memory-safe") {
+            callsHash := keccak256(add(callsData, 0x20), mload(callsData))
+        }
     }
 }

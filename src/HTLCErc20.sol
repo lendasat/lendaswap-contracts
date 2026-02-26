@@ -14,19 +14,19 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract HTLCErc20 {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 2;
+    uint8 public constant VERSION = 3;
 
     // -- EIP-712 --
 
     bytes32 public constant TYPEHASH_REDEEM = keccak256(
-        "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut)"
+        "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut,bytes32 callsHash)"
     );
 
     bytes32 public immutable DOMAIN_SEPARATOR = keccak256(
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256("HTLCErc20"),
-            keccak256("2"),
+            keccak256("3"),
             block.chainid,
             address(this)
         )
@@ -141,10 +141,10 @@ contract HTLCErc20 {
 
     /// @notice Redeem tokens using an EIP-712 signature from the claimAddress (gasless / delegated)
     /// @dev Anyone can call this function. The claimAddress is recovered from the signature
-    ///      which includes msg.sender as the authorized caller, destination, sweepToken, and
-    ///      minAmountOut. Tokens are sent to msg.sender (not claimAddress). All execution
-    ///      parameters are cryptographically bound to the signature, so the outcome is
-    ///      guaranteed by the signer regardless of who submits the transaction.
+    ///      which includes msg.sender as the authorized caller, destination, sweepToken,
+    ///      minAmountOut, and callsHash. Tokens are sent to msg.sender (not claimAddress).
+    ///      All execution parameters are cryptographically bound to the signature, so the
+    ///      outcome is guaranteed by the signer regardless of who submits the transaction.
     /// @param preimage Secret whose SHA-256 hash matches the preimageHash used at creation
     /// @param amount Amount that was locked
     /// @param token Token that was locked
@@ -153,6 +153,7 @@ contract HTLCErc20 {
     /// @param destination Address where the caller intends to route tokens after redeem
     /// @param sweepToken Token the caller will sweep to destination (bound to signature)
     /// @param minAmountOut Minimum amount of sweepToken required (bound to signature)
+    /// @param callsHash Hash of the calls array (bound to signature, prevents call substitution)
     /// @param v ECDSA recovery id
     /// @param r ECDSA signature component
     /// @param s ECDSA signature component
@@ -166,6 +167,7 @@ contract HTLCErc20 {
         address destination,
         address sweepToken,
         uint256 minAmountOut,
+        bytes32 callsHash,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -177,7 +179,7 @@ contract HTLCErc20 {
             bytes32 structHash = keccak256(
                 abi.encode(
                     TYPEHASH_REDEEM, preimage, amount, token, sender, timelock,
-                    msg.sender, destination, sweepToken, minAmountOut
+                    msg.sender, destination, sweepToken, minAmountOut, callsHash
                 )
             );
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
