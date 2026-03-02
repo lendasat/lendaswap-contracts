@@ -22,6 +22,10 @@ contract HTLCErc20 {
         "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut,bytes32 callsHash)"
     );
 
+    bytes32 public constant TYPEHASH_REFUND = keccak256(
+        "Refund(bytes32 preimageHash,uint256 amount,address token,address refundAddress,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut)"
+    );
+
     bytes32 public immutable DOMAIN_SEPARATOR = keccak256(
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
@@ -234,6 +238,67 @@ contract HTLCErc20 {
     ) external nonReentrant {
         _refund(preimageHash, amount, token, claimAddress, timelock);
         IERC20(token).safeTransfer(destination, amount);
+    }
+
+    /// @notice Refund tokens before timelock using an EIP-712 signature from the claimAddress
+    /// @dev The claimAddress signs to waive the timelock, enabling collaborative refunds.
+    ///      Anyone can call this function. The claimAddress is recovered from the signature.
+    ///      Tokens are sent to msg.sender (not the refund address or claimAddress).
+    ///      All execution parameters are cryptographically bound to the signature.
+    /// @param preimageHash The preimage hash used at creation (NOT the preimage — refunder doesn't know it)
+    /// @param amount Amount that was locked
+    /// @param token Token that was locked
+    /// @param refundAddress The original sender/refund address from HTLC creation
+    /// @param timelock Timelock that was set at creation
+    /// @param destination Address where the caller intends to route tokens after refund
+    /// @param sweepToken Token the caller will sweep to destination (bound to signature)
+    /// @param minAmountOut Minimum amount of sweepToken required (bound to signature)
+    /// @param v ECDSA recovery id
+    /// @param r ECDSA signature component
+    /// @param s ECDSA signature component
+    /// @return claimAddress The address recovered from the signature
+    function refundBySig(
+        bytes32 preimageHash,
+        uint256 amount,
+        address token,
+        address refundAddress,
+        uint256 timelock,
+        address destination,
+        address sweepToken,
+        uint256 minAmountOut,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant returns (address claimAddress) {
+        // Scoped to reduce stack depth
+        {
+            bytes32 structHash = keccak256(
+                abi.encode(
+                    TYPEHASH_REFUND,
+                    preimageHash,
+                    amount,
+                    token,
+                    refundAddress,
+                    timelock,
+                    msg.sender,
+                    destination,
+                    sweepToken,
+                    minAmountOut
+                )
+            );
+            bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+            claimAddress = ecrecover(digest, v, r, s);
+        }
+
+        bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
+        require(swaps[key], "HTLC: swap not found");
+
+        delete swaps[key];
+
+        emit SwapRefunded(preimageHash);
+
+        // Tokens go to msg.sender (the authorized caller), not refundAddress
+        IERC20(token).safeTransfer(msg.sender, amount);
     }
 
     // -- View functions --

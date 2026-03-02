@@ -30,6 +30,20 @@ contract HTLCCoordinator {
     string public constant TYPESTRING_EXECUTE_AND_CREATE =
         "ExecuteAndCreate witness)ExecuteAndCreate(bytes32 preimageHash,address token,address claimAddress,address refundAddress,uint256 timelock,bytes32 callsHash)TokenPermissions(address token,uint256 amount)";
 
+    bytes32 public constant TYPEHASH_COLLAB_REFUND = keccak256(
+        "CollabRefund(bytes32 preimageHash,uint256 amount,address token,address claimAddress,uint256 timelock,address caller,address sweepToken,uint256 minAmountOut)"
+    );
+
+    bytes32 public immutable DOMAIN_SEPARATOR = keccak256(
+        abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256("HTLCCoordinator"),
+            keccak256("3"),
+            block.chainid,
+            address(this)
+        )
+    );
+
     // -- Errors --
 
     error Reentrancy();
@@ -228,6 +242,162 @@ contract HTLCCoordinator {
         delete deposits[key];
 
         HTLC.refund(preimageHash, amount, token, claimAddress, timelock, depositor);
+    }
+
+    /// @notice Collaboratively refund a coordinator-created HTLC before timelock expiry,
+    ///         execute arbitrary calls (e.g. fee skim + DEX swap), then sweep to depositor
+    /// @dev Requires TWO signatures:
+    ///      - Depositor EIP-712 sig (coordinator-level, authorizes refund params)
+    ///      - ClaimAddress EIP-712 sig (HTLC-level, waives timelock via refundBySig)
+    ///      Anyone can submit the transaction (gasless for both parties).
+    /// @param preimageHash The preimage hash used at HTLC creation
+    /// @param amount       Token amount locked in the HTLC
+    /// @param token        ERC20 token locked in the HTLC
+    /// @param claimAddress Claim address set at HTLC creation
+    /// @param timelock     Timelock set at HTLC creation
+    /// @param calls        Arbitrary calls to execute after refund (e.g. fee skim + DEX swap)
+    /// @param sweepToken   Token to sweep to the depositor (address(0) for ETH)
+    /// @param minAmountOut Minimum balance required before sweeping
+    /// @param depositorV   ECDSA recovery id (depositor's coordinator-level signature)
+    /// @param depositorR   ECDSA signature component (depositor's coordinator-level signature)
+    /// @param depositorS   ECDSA signature component (depositor's coordinator-level signature)
+    /// @param claimV       ECDSA recovery id (claimAddress's HTLC-level refundBySig signature)
+    /// @param claimR       ECDSA signature component (claimAddress's HTLC-level refundBySig signature)
+    /// @param claimS       ECDSA signature component (claimAddress's HTLC-level refundBySig signature)
+    function collabRefundAndExecute(
+        bytes32 preimageHash,
+        uint256 amount,
+        address token,
+        address claimAddress,
+        uint256 timelock,
+        Call[] calldata calls,
+        address sweepToken,
+        uint256 minAmountOut,
+        uint8 depositorV,
+        bytes32 depositorR,
+        bytes32 depositorS,
+        uint8 claimV,
+        bytes32 claimR,
+        bytes32 claimS
+    ) external nonReentrant {
+        // 1. Look up depositor from coordinator's mapping
+        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
+        address depositor = deposits[key];
+        require(depositor != address(0), "Coordinator: unknown HTLC");
+
+        // 2. Verify depositor's EIP-712 signature (coordinator-level)
+        {
+            bytes32 structHash = keccak256(
+                abi.encode(
+                    TYPEHASH_COLLAB_REFUND,
+                    preimageHash,
+                    amount,
+                    token,
+                    claimAddress,
+                    timelock,
+                    msg.sender,
+                    sweepToken,
+                    minAmountOut
+                )
+            );
+            bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+            address recovered = ecrecover(digest, depositorV, depositorR, depositorS);
+            require(recovered == depositor, "Coordinator: invalid depositor signature");
+        }
+
+        // 3. Clear the deposit record
+        delete deposits[key];
+
+        // 4. Call HTLC.refundBySig with the claimAddress's signature
+        //    This recovers claimAddress, verifies the swap, deletes it, and sends tokens here
+        HTLC.refundBySig(
+            preimageHash,
+            amount,
+            token,
+            address(this),
+            timelock,
+            depositor,
+            sweepToken,
+            minAmountOut,
+            claimV,
+            claimR,
+            claimS
+        );
+
+        // 5. Execute calls (fee skim, DEX swap, etc.)
+        if (calls.length > 0) {
+            _executeCalls(calls);
+        }
+
+        // 6. Sweep result to depositor
+        _sweep(depositor, sweepToken, minAmountOut);
+    }
+
+    /// @notice Collaboratively refund a coordinator-created HTLC before timelock,
+    ///         sending the locked token directly to the depositor (no swap-back)
+    /// @dev Same two-signature pattern but simpler — no calls array, no sweep token.
+    ///      The HTLC token is sent directly to the depositor.
+    /// @param preimageHash The preimage hash used at HTLC creation
+    /// @param amount       Token amount locked in the HTLC
+    /// @param token        ERC20 token locked in the HTLC
+    /// @param claimAddress Claim address set at HTLC creation
+    /// @param timelock     Timelock set at HTLC creation
+    /// @param depositorV   ECDSA recovery id (depositor's coordinator-level signature)
+    /// @param depositorR   ECDSA signature component (depositor's coordinator-level signature)
+    /// @param depositorS   ECDSA signature component (depositor's coordinator-level signature)
+    /// @param claimV       ECDSA recovery id (claimAddress's HTLC-level refundBySig signature)
+    /// @param claimR       ECDSA signature component (claimAddress's HTLC-level refundBySig signature)
+    /// @param claimS       ECDSA signature component (claimAddress's HTLC-level refundBySig signature)
+    function collabRefundTo(
+        bytes32 preimageHash,
+        uint256 amount,
+        address token,
+        address claimAddress,
+        uint256 timelock,
+        uint8 depositorV,
+        bytes32 depositorR,
+        bytes32 depositorS,
+        uint8 claimV,
+        bytes32 claimR,
+        bytes32 claimS
+    ) external nonReentrant {
+        // 1. Look up depositor from coordinator's mapping
+        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
+        address depositor = deposits[key];
+        require(depositor != address(0), "Coordinator: unknown HTLC");
+
+        // 2. Verify depositor's EIP-712 signature (coordinator-level)
+        //    For collabRefundTo: sweepToken=token, minAmountOut=0, caller=msg.sender
+        {
+            bytes32 structHash = keccak256(
+                abi.encode(
+                    TYPEHASH_COLLAB_REFUND,
+                    preimageHash,
+                    amount,
+                    token,
+                    claimAddress,
+                    timelock,
+                    msg.sender,
+                    token,
+                    uint256(0)
+                )
+            );
+            bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+            address recovered = ecrecover(digest, depositorV, depositorR, depositorS);
+            require(recovered == depositor, "Coordinator: invalid depositor signature");
+        }
+
+        // 3. Clear the deposit record
+        delete deposits[key];
+
+        // 4. Call HTLC.refundBySig — tokens come to this coordinator
+        //    For direct refund: destination=depositor, sweepToken=token, minAmountOut=0
+        HTLC.refundBySig(
+            preimageHash, amount, token, address(this), timelock, depositor, token, uint256(0), claimV, claimR, claimS
+        );
+
+        // 5. Transfer directly to depositor (no calls, no sweep)
+        IERC20(token).safeTransfer(depositor, amount);
     }
 
     // -- Internal helpers --
