@@ -22,11 +22,14 @@ use alloy::primitives::FixedBytes;
 use alloy::primitives::U160;
 use alloy::primitives::U256;
 use alloy::primitives::address;
+use alloy::primitives::keccak256;
 use alloy::providers::Provider;
 use alloy::providers::ProviderBuilder;
+use alloy::signers::Signer;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use alloy::sol_types::SolCall;
+use alloy::sol_types::SolValue;
 use anyhow::Result;
 use sha2::Digest;
 use sha2::Sha256;
@@ -59,7 +62,13 @@ sol! {
         function balanceOf(address account) external view returns (uint256);
         function approve(address spender, uint256 amount) external returns (bool);
         function transfer(address to, uint256 amount) external returns (bool);
-        function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    }
+}
+
+sol! {
+    #[sol(rpc)]
+    interface IPermit2 {
+        function DOMAIN_SEPARATOR() external view returns (bytes32);
     }
 }
 
@@ -102,6 +111,10 @@ const USDC_TEST_AMOUNT: u128 = 100_000_000; // 100e6
 const FORK_BLOCK: u64 = 82_488_076;
 /// Known USDC whale on Polygon
 const USDC_WHALE: Address = address!("0x852f57dd17edbb0bedae8c55dd4b20feb3133089");
+/// Canonical Permit2 address (deployed on Polygon mainnet)
+const PERMIT2_ADDRESS: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+const TOKEN_PERMISSIONS_TYPEHASH: &str = "TokenPermissions(address token,uint256 amount)";
+const PERMIT2_WITNESS_TYPEHASH_STUB: &str = "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,";
 
 // ---------------------------------------------------------------------------
 // Test
@@ -129,9 +142,8 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
     // Alice (uses a wallet-backed provider for sending txs)
     let alice_key: PrivateKeySigner = anvil.keys()[0].clone().into();
     let alice_address = alice_key.address();
-    let alice_wallet = EthereumWallet::from(alice_key);
     let alice_provider = ProviderBuilder::new()
-        .wallet(alice_wallet)
+        .wallet(EthereumWallet::from(alice_key.clone()))
         .connect_http(endpoint.clone());
 
     // Bob (claims the HTLC by revealing the preimage)
@@ -166,7 +178,7 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
     let htlc_address = *htlc.address();
     println!("   HTLCErc20 at {htlc_address} (deployed by hub)");
 
-    let coordinator = HTLCCoordinator::deploy(&hub_provider, htlc_address, Address::ZERO).await?;
+    let coordinator = HTLCCoordinator::deploy(&hub_provider, htlc_address, PERMIT2_ADDRESS).await?;
     let coordinator_address = *coordinator.address();
     println!("   HTLCCoordinator at {coordinator_address} (deployed by hub)");
 
@@ -219,65 +231,48 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
     assert_eq!(alice_usdc_before, U256::from(USDC_TEST_AMOUNT));
 
     // -----------------------------------------------------------------------
-    // 3. Alice approves USDC to the coordinator
+    // 3. Alice approves USDC to Permit2
     // -----------------------------------------------------------------------
-    println!("\n3. Alice approving USDC to coordinator ...");
+    println!("\n3. Alice approving USDC to Permit2 ...");
 
     let usdc_as_alice = IERC20::new(USDC, &alice_provider);
     usdc_as_alice
-        .approve(coordinator_address, U256::from(USDC_TEST_AMOUNT))
+        .approve(PERMIT2_ADDRESS, U256::MAX)
         .send()
         .await?
         .get_receipt()
         .await?;
-    println!("   Approved {USDC_TEST_AMOUNT} USDC");
+    println!("   Approved USDC to Permit2");
 
     // -----------------------------------------------------------------------
-    // 4. Build Call[] structs for executeAndCreate
+    // 4. Build Call[] structs for executeAndCreateWithPermit2
     // -----------------------------------------------------------------------
-    println!("\n4. Building calls for executeAndCreate ...");
+    println!("\n4. Building calls for executeAndCreateWithPermit2 ...");
 
     let block = alice_provider.get_block_number().await?;
-    let deadline = U256::from(
-        raw_provider
-            .get_block_by_number(block.into())
-            .await?
-            .expect("block exists")
-            .header
-            .timestamp
-            + 600, // 10 minutes
-    );
+    let block_ts = raw_provider
+        .get_block_by_number(block.into())
+        .await?
+        .expect("block exists")
+        .header
+        .timestamp;
+    let deadline = U256::from(block_ts + 600); // 10 minutes
 
     // Preimage / hash
     let preimage = FixedBytes::<32>::from([0xABu8; 32]);
     let preimage_hash = FixedBytes::<32>::from_slice(&Sha256::digest(preimage.as_slice()));
 
     // Timelock — far in the future relative to the fork block
-    let timelock_ts = raw_provider
-        .get_block_by_number(block.into())
-        .await?
-        .expect("block exists")
-        .header
-        .timestamp
-        + 3600; // 1 hour from current block
-    let timelock = U256::from(timelock_ts);
+    let timelock = U256::from(block_ts + 3600); // 1 hour from current block
 
-    // Call 0: USDC.transferFrom(alice, coordinator, amount)
-    let call0_data = IERC20::transferFromCall {
-        from: alice_address,
-        to: coordinator_address,
-        amount: U256::from(USDC_TEST_AMOUNT),
-    }
-    .abi_encode();
-
-    // Call 1: USDC.approve(uniswapRouter, amount)
-    let call1_data = IERC20::approveCall {
+    // Call 0: USDC.approve(uniswapRouter, amount)
+    let call0_data = IERC20::approveCall {
         spender: UNISWAP_ROUTER,
         amount: U256::from(USDC_TEST_AMOUNT),
     }
     .abi_encode();
 
-    // Call 2: router.exactInputSingle(...)
+    // Call 1: router.exactInputSingle(...)
     let swap_params = ISwapRouter::ExactInputSingleParams {
         tokenIn: USDC,
         tokenOut: WBTC,
@@ -288,7 +283,7 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
         amountOutMinimum: U256::ZERO, // no slippage protection for test
         sqrtPriceLimitX96: U160::ZERO,
     };
-    let call2_data = ISwapRouter::exactInputSingleCall {
+    let call1_data = ISwapRouter::exactInputSingleCall {
         params: swap_params,
     }
     .abi_encode();
@@ -300,30 +295,111 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
             callData: Bytes::from(call0_data),
         },
         HTLCCoordinator::Call {
-            target: USDC,
+            target: UNISWAP_ROUTER,
             value: U256::ZERO,
             callData: Bytes::from(call1_data),
         },
-        HTLCCoordinator::Call {
-            target: UNISWAP_ROUTER,
-            value: U256::ZERO,
-            callData: Bytes::from(call2_data),
-        },
     ];
 
-    println!("   3 calls prepared (transferFrom, approve, exactInputSingle)");
+    println!("   2 calls prepared (approve, exactInputSingle)");
 
     // -----------------------------------------------------------------------
-    // 5. Call coordinator.executeAndCreate(...) First overload: (Call[], preimageHash, token,
-    //    recipient, timelock, refundCallsHash)
+    // 5. Build Permit2 signature and call executeAndCreateWithPermit2
     // -----------------------------------------------------------------------
-    println!("\n5. Calling coordinator.executeAndCreate ...");
+    println!("\n5. Calling coordinator.executeAndCreateWithPermit2 ...");
+
+    let calls_hash = keccak256(calls.abi_encode());
+
+    let coordinator_instance = HTLCCoordinator::new(coordinator_address, &raw_provider);
+    let coordinator_typehash = coordinator_instance
+        .TYPEHASH_EXECUTE_AND_CREATE()
+        .call()
+        .await?;
+
+    let witness = keccak256(
+        (
+            coordinator_typehash,
+            preimage_hash,
+            WBTC,
+            bob_address,
+            coordinator_address,
+            timelock,
+            calls_hash,
+        )
+            .abi_encode(),
+    );
+
+    let permit = ISignatureTransfer::PermitTransferFrom {
+        permitted: ISignatureTransfer::TokenPermissions {
+            token: USDC,
+            amount: U256::from(USDC_TEST_AMOUNT),
+        },
+        nonce: U256::ZERO,
+        deadline: timelock + U256::from(3600),
+    };
+
+    let typehash = keccak256(
+        format!(
+            "{}{}",
+            PERMIT2_WITNESS_TYPEHASH_STUB,
+            coordinator_instance
+                .TYPESTRING_EXECUTE_AND_CREATE()
+                .call()
+                .await?
+        )
+        .as_bytes(),
+    );
+
+    let token_permissions_hash = keccak256(
+        (
+            keccak256(TOKEN_PERMISSIONS_TYPEHASH.as_bytes()),
+            permit.permitted.token,
+            permit.permitted.amount,
+        )
+            .abi_encode(),
+    );
+
+    let struct_hash = keccak256(
+        (
+            typehash,
+            token_permissions_hash,
+            coordinator_address,
+            permit.nonce,
+            permit.deadline,
+            witness,
+        )
+            .abi_encode(),
+    );
+
+    let domain_separator = IPermit2::new(PERMIT2_ADDRESS, &raw_provider)
+        .DOMAIN_SEPARATOR()
+        .call()
+        .await?;
+
+    let digest = keccak256(
+        [
+            b"\x19\x01",
+            domain_separator.as_slice(),
+            struct_hash.as_slice(),
+        ]
+        .concat(),
+    );
+
+    let sig = alice_key.sign_hash(&digest).await?;
+    let signature = Bytes::from(sig.as_bytes().to_vec());
 
     let coordinator_as_alice = HTLCCoordinator::new(coordinator_address, &alice_provider);
-
-    // Alloy disambiguates overloaded functions with _0 / _1 suffixes.
     let receipt = coordinator_as_alice
-        .executeAndCreate_1(calls, preimage_hash, WBTC, bob_address, timelock)
+        .executeAndCreateWithPermit2_0(
+            calls,
+            preimage_hash,
+            WBTC,
+            bob_address,
+            timelock,
+            alice_address,
+            permit,
+            signature,
+        )
         .send()
         .await?
         .get_receipt()
@@ -334,7 +410,10 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
         receipt.transaction_hash,
         receipt.status()
     );
-    assert!(receipt.status(), "executeAndCreate tx should succeed");
+    assert!(
+        receipt.status(),
+        "executeAndCreateWithPermit2 tx should succeed"
+    );
 
     // -----------------------------------------------------------------------
     // 6. Assertions
