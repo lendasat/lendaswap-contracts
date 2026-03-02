@@ -390,7 +390,7 @@ async fn test_e2e_swap_then_lock_then_redeem() -> Result<()> {
 
     let coordinator_as_alice = HTLCCoordinator::new(coordinator_address, &alice_provider);
     let receipt = coordinator_as_alice
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             calls,
             preimage_hash,
             WBTC,

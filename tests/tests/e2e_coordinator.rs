@@ -406,7 +406,7 @@ async fn test_lock_and_execute() -> Result<()> {
 
     let coordinator_alice = HTLCCoordinator::new(*coordinator.address(), &alice_provider);
     let receipt = coordinator_alice
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             calls,
             preimage_hash,
             *wbtc.address(),
@@ -593,7 +593,7 @@ async fn test_claim() -> Result<()> {
     .await?;
 
     let create_receipt = HTLCCoordinator::new(*coordinator.address(), &alice_provider)
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             calls,
             preimage_hash,
             *wbtc.address(),
@@ -814,7 +814,7 @@ async fn test_refund_and_execute() -> Result<()> {
     .await?;
 
     let create_receipt = HTLCCoordinator::new(*coordinator.address(), &alice_provider)
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             forward_calls,
             preimage_hash,
             *wbtc.address(),
@@ -1023,7 +1023,7 @@ async fn test_refund_to() -> Result<()> {
     .await?;
 
     HTLCCoordinator::new(*coordinator.address(), &alice_provider)
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             calls,
             preimage_hash,
             *wbtc.address(),

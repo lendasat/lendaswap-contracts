@@ -121,37 +121,6 @@ contract HTLCCoordinator {
         deposits[key] = depositor;
     }
 
-    /// @notice Pull tokens from refundAddress via Permit2, execute arbitrary calls,
-    ///         then lock the resulting balance in an HTLC with an explicit refund address
-    /// @dev The refundAddress is set as the HTLC sender — user refunds directly on HTLCErc20.
-    ///      Cannot use refundAndExecute (no depositor tracking).
-    /// @param calls         Arbitrary calls to execute (e.g. DEX swap)
-    /// @param preimageHash  SHA-256 preimage hash for the HTLC
-    /// @param token         Output ERC20 token to lock in the HTLC (e.g. WBTC after a USDC→WBTC swap).
-    ///                      The input token is specified in permit.permitted.token.
-    /// @param refundAddress Address that can refund after timelock (the actual user)
-    /// @param claimAddress  Address authorized to redeem the HTLC
-    /// @param timelock      Unix timestamp after which a refund is possible
-    /// @param permit        Permit2 permit data (input token, amount, nonce, deadline)
-    /// @param signature     Permit2 signature from the refundAddress
-    function executeAndCreateWithPermit2(
-        Call[] calldata calls,
-        bytes32 preimageHash,
-        address token,
-        address refundAddress,
-        address claimAddress,
-        uint256 timelock,
-        ISignatureTransfer.PermitTransferFrom calldata permit,
-        bytes calldata signature
-    ) external nonReentrant {
-        _permit2Transfer(
-            token, preimageHash, claimAddress, refundAddress, timelock, calls, refundAddress, permit, signature
-        );
-
-        _executeCalls(calls);
-        _createFromBalance(preimageHash, token, refundAddress, claimAddress, timelock);
-    }
-
     /// @notice Redeem tokens from an HTLC via EIP-712 signature, execute arbitrary
     ///         calls, then sweep the resulting balance to a signed destination
     /// @dev The claimAddress signs an HTLC-level EIP-712 message authorizing this
@@ -262,20 +231,6 @@ contract HTLCCoordinator {
     }
 
     // -- Internal helpers --
-
-    function _createFromBalance(
-        bytes32 preimageHash,
-        address token,
-        address refundAddress,
-        address claimAddress,
-        uint256 timelock
-    ) internal {
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        require(balance > 0, "Coordinator: insufficient balance");
-
-        IERC20(token).forceApprove(address(HTLC), balance);
-        HTLC.create(preimageHash, balance, token, refundAddress, claimAddress, timelock);
-    }
 
     function _executeCalls(Call[] calldata calls) internal {
         uint256 length = calls.length;

@@ -495,7 +495,7 @@ async fn test_e2e_permit2_swap_lock_then_claim() -> Result<()> {
     // Relayer submits on behalf of Bob
     let coordinator_relayer = HTLCCoordinator::new(*coordinator.address(), &relayer_provider);
     let receipt = coordinator_relayer
-        .executeAndCreateWithPermit2_0(
+        .executeAndCreateWithPermit2(
             calls,
             preimage_hash,
             *wbtc.address(),

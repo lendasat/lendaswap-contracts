@@ -166,57 +166,6 @@ contract HTLCCoordinatorPermit2Test is Test {
     }
 
     // ---------------------------------------------------------------
-    // Happy path: explicit refund variant (Alice refunds directly)
-    // ---------------------------------------------------------------
-
-    function test_permit2_explicitRefund_lockAndRefund() public {
-        // Build calls: approve DEX, swap USDC -> WBTC
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](2);
-        calls[0] = HTLCCoordinator.Call({
-            target: address(usdc),
-            value: 0,
-            callData: abi.encodeCall(IERC20.approve, (address(dex), usdcAmount))
-        });
-        calls[1] = HTLCCoordinator.Call({
-            target: address(dex),
-            value: 0,
-            callData: abi.encodeWithSignature(
-                "swap(address,address,uint256,uint256)",
-                address(usdc), address(wbtc), usdcAmount, wbtcAmount
-            )
-        });
-
-        ISignatureTransfer.PermitTransferFrom memory permit = ISignatureTransfer.PermitTransferFrom({
-            permitted: ISignatureTransfer.TokenPermissions({token: address(usdc), amount: usdcAmount}),
-            nonce: 0,
-            deadline: block.timestamp + 1 hours
-        });
-
-        // Witness uses the HTLC lock token (wbtc), not the Permit2 transfer token (usdc)
-        // For explicit refund variant, refundAddress = alice
-        bytes32 witness = _computeWitness(preimageHash, address(wbtc), bob, alice, timelock, calls);
-        bytes memory signature = _signPermit2WitnessTransfer(permit, witness, alicePk);
-
-        address relayer = makeAddr("relayer");
-        vm.prank(relayer);
-        coordinator.executeAndCreateWithPermit2(
-            calls, preimageHash, address(wbtc), alice, bob, timelock, permit, signature
-        );
-
-        // Verify: HTLC created with Alice as sender
-        assertTrue(
-            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, bob, timelock),
-            "swap should be active with alice as sender"
-        );
-
-        // Alice refunds directly on the HTLC after timelock
-        vm.warp(timelock + 1);
-        vm.prank(alice);
-        htlc.refund(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
-        assertEq(wbtc.balanceOf(alice), 10e8 + wbtcAmount, "alice should have her WBTC back");
-    }
-
-    // ---------------------------------------------------------------
     // Zero calls: direct lock without swap
     // ---------------------------------------------------------------
 

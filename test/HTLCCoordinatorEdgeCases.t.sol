@@ -117,40 +117,6 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // executeAndCreateWithPermit2: explicit refundAddress
-    // ---------------------------------------------------------------
-
-    function test_executeAndCreate_explicitRefundAddress() public {
-        HTLCCoordinator.Call[] memory calls = _buildSwapCalls(
-            address(usdc), address(wbtc), usdcAmount, wbtcAmount
-        );
-
-        // Sign with Alice as refundAddress (explicit refund variant)
-        (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
-            _signPermit2(address(usdc), usdcAmount, 0, alice, calls);
-
-        // Relayer submits on behalf of Alice
-        address relayer = makeAddr("relayer");
-        vm.prank(relayer);
-        coordinator.executeAndCreateWithPermit2(
-            calls, preimageHash, address(wbtc), alice, bob, timelock, permit, signature
-        );
-
-        // Verify: HTLC created with Alice as sender (refund address)
-        assertTrue(
-            htlc.isActive(preimageHash, wbtcAmount, address(wbtc), alice, bob, timelock),
-            "swap should be active with alice as sender"
-        );
-
-        // Alice can refund directly on the HTLC (no coordinator deposit needed)
-        vm.warp(timelock + 1);
-        vm.prank(alice);
-        htlc.refund(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
-
-        assertEq(wbtc.balanceOf(alice), 10e8 + wbtcAmount, "alice should have her WBTC back");
-    }
-
-    // ---------------------------------------------------------------
     // RestrictedTarget
     // ---------------------------------------------------------------
 
