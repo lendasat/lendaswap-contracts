@@ -84,14 +84,16 @@ contract HTLCCoordinator {
     /// @notice Pull tokens from depositor via Permit2, execute arbitrary calls, then
     ///         lock the resulting balance in an HTLC with the coordinator as sender
     /// @dev The coordinator becomes the HTLC sender (depositor tracking enabled).
-    ///      If the swap expires, anyone can call refundAndExecute or refundTo.
+    ///      If the swap expires, only the depositor can call refundAndExecute;
+    ///      refundTo is permissionless but always sends tokens to the depositor.
     /// @param calls        Arbitrary calls to execute (e.g. DEX swap)
     /// @param preimageHash SHA-256 preimage hash for the HTLC
-    /// @param token        ERC20 token to lock (must be the output of the calls)
+    /// @param token        Output ERC20 token to lock in the HTLC (e.g. WBTC after a USDC→WBTC swap).
+    ///                     The input token is specified in permit.permitted.token.
     /// @param claimAddress Address authorized to redeem the HTLC
     /// @param timelock     Unix timestamp after which a refund is possible
     /// @param depositor    Address whose tokens are pulled via Permit2
-    /// @param permit       Permit2 permit data (token, amount, nonce, deadline)
+    /// @param permit       Permit2 permit data (input token, amount, nonce, deadline)
     /// @param signature    Permit2 signature from the depositor
     function executeAndCreateWithPermit2(
         Call[] calldata calls,
@@ -125,11 +127,12 @@ contract HTLCCoordinator {
     ///      Cannot use refundAndExecute (no depositor tracking).
     /// @param calls         Arbitrary calls to execute (e.g. DEX swap)
     /// @param preimageHash  SHA-256 preimage hash for the HTLC
-    /// @param token         ERC20 token to lock (must be the output of the calls)
+    /// @param token         Output ERC20 token to lock in the HTLC (e.g. WBTC after a USDC→WBTC swap).
+    ///                      The input token is specified in permit.permitted.token.
     /// @param refundAddress Address that can refund after timelock (the actual user)
     /// @param claimAddress  Address authorized to redeem the HTLC
     /// @param timelock      Unix timestamp after which a refund is possible
-    /// @param permit        Permit2 permit data (token, amount, nonce, deadline)
+    /// @param permit        Permit2 permit data (input token, amount, nonce, deadline)
     /// @param signature     Permit2 signature from the refundAddress
     function executeAndCreateWithPermit2(
         Call[] calldata calls,
