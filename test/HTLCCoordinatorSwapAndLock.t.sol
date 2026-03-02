@@ -3,14 +3,15 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISignatureTransfer} from "permit2/interfaces/ISignatureTransfer.sol";
 import {DeployPermit2} from "../lib/permit2/test/utils/DeployPermit2.sol";
 import {HTLCErc20} from "../src/HTLCErc20.sol";
 import {HTLCCoordinator} from "../src/HTLCCoordinator.sol";
 
-contract MockUSDC is ERC20 {
-    constructor() ERC20("USD Coin", "USDC") {
+contract MockUSDC is ERC20, ERC20Permit {
+    constructor() ERC20("USD Coin", "USDC") ERC20Permit("USD Coin") {
         _mint(msg.sender, 1_000_000e6);
     }
 
