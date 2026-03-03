@@ -459,7 +459,8 @@ async fn test_e2e_permit2_swap_lock_then_claim() -> Result<()> {
     let calls = build_forward_calls(*usdc.address(), *wbtc.address(), *dex.address());
     let calls_hash = compute_calls_hash(&calls);
 
-    // Witness: ExecuteAndCreate(preimageHash, token, claimAddress, refundAddress, timelock, callsHash)
+    // Witness: ExecuteAndCreate(preimageHash, token, claimAddress, refundAddress, timelock,
+    // callsHash)
     let coordinator_typehash = HTLCCoordinator::new(*coordinator.address(), &raw_provider)
         .TYPEHASH_EXECUTE_AND_CREATE()
         .call()

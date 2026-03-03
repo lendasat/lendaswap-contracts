@@ -6,7 +6,8 @@
 //! lifecycle can be validated locally without RPC credentials.
 //! Tests 3 and 4 (refund paths) are unique to this file.
 //!
-//! 1. `test_lock_and_execute`    — `executeAndCreateWithPermit2`: swap USDC→WBTC via DEX, lock WBTC in HTLC
+//! 1. `test_lock_and_execute`    — `executeAndCreateWithPermit2`: swap USDC→WBTC via DEX, lock WBTC
+//!    in HTLC
 //! 2. `test_claim`               — Bob redeems the HTLC with the preimage
 //! 3. `test_refund_and_execute`  — `refundAndExecute`: after timelock, depositor swaps WBTC back to
 //!    USDC
