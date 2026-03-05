@@ -31,7 +31,7 @@ contract HTLCCoordinator {
         "ExecuteAndCreate witness)ExecuteAndCreate(bytes32 preimageHash,address token,address claimAddress,address refundAddress,uint256 timelock,bytes32 callsHash)TokenPermissions(address token,uint256 amount)";
 
     bytes32 public constant TYPEHASH_COLLAB_REFUND = keccak256(
-        "CollabRefund(bytes32 preimageHash,uint256 amount,address token,address claimAddress,uint256 timelock,address caller,address sweepToken,uint256 minAmountOut)"
+        "CollabRefund(bytes32 preimageHash,uint256 amount,address token,address claimAddress,uint256 timelock,address caller,address sweepToken,uint256 minAmountOut,bytes32 callsHash)"
     );
 
     bytes32 public immutable DOMAIN_SEPARATOR = keccak256(
@@ -287,6 +287,7 @@ contract HTLCCoordinator {
 
         // 2. Verify depositor's EIP-712 signature (coordinator-level)
         {
+            bytes32 callsHash = _computeCallsHash(calls);
             bytes32 structHash = keccak256(
                 abi.encode(
                     TYPEHASH_COLLAB_REFUND,
@@ -297,7 +298,8 @@ contract HTLCCoordinator {
                     timelock,
                     msg.sender,
                     sweepToken,
-                    minAmountOut
+                    minAmountOut,
+                    callsHash
                 )
             );
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));

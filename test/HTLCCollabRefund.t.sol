@@ -200,8 +200,12 @@ contract HTLCCollabRefundTest is Test {
         _aliceSwapAndLock();
 
         // Both sign for collabRefundAndExecute (sweepToken=wbtc, minAmountOut=0)
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -214,8 +218,6 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
         uint256 aliceBefore = wbtc.balanceOf(alice);
 
         vm.prank(relay);
@@ -233,8 +235,12 @@ contract HTLCCollabRefundTest is Test {
 
         assertLt(block.timestamp, timelock, "should be before timelock");
 
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -247,8 +253,6 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(relay);
         coordinator.collabRefundAndExecute(
@@ -270,21 +274,6 @@ contract HTLCCollabRefundTest is Test {
         uint256 swapAmount = wbtcAmount - fee;
         uint256 expectedUsdc = (swapAmount * 60_000e6) / 1e8;
 
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(usdc), 0);
-        (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
-            bobPk,
-            preimageHash,
-            wbtcAmount,
-            address(wbtc),
-            address(coordinator),
-            timelock,
-            address(coordinator),
-            alice,
-            address(usdc),
-            0
-        );
-
         // Build calls: fee skim + approve + DEX swap
         HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](3);
         calls[0] = HTLCCoordinator.Call({
@@ -300,6 +289,24 @@ contract HTLCCollabRefundTest is Test {
                 "swap(address,address,uint256,uint256)", address(wbtc), address(usdc), swapAmount, 0
             )
         });
+
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(usdc), 0, callsHash
+        );
+        (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
+            bobPk,
+            preimageHash,
+            wbtcAmount,
+            address(wbtc),
+            address(coordinator),
+            timelock,
+            address(coordinator),
+            alice,
+            address(usdc),
+            0
+        );
 
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
@@ -320,8 +327,16 @@ contract HTLCCollabRefundTest is Test {
         // Just fee skim, no DEX swap — client gets WBTC minus fee
         uint256 fee = 1000;
 
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](1);
+        calls[0] = HTLCCoordinator.Call({
+            target: address(wbtc), value: 0, callData: abi.encodeCall(IERC20.transfer, (relay, fee))
+        });
+
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -334,11 +349,6 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](1);
-        calls[0] = HTLCCoordinator.Call({
-            target: address(wbtc), value: 0, callData: abi.encodeCall(IERC20.transfer, (relay, fee))
-        });
 
         uint256 aliceBefore = wbtc.balanceOf(alice);
 
@@ -356,8 +366,12 @@ contract HTLCCollabRefundTest is Test {
     // ---------------------------------------------------------------
 
     function test_collabRefundAndExecute_unknownHTLC_reverts() public {
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -370,8 +384,6 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(relay);
         vm.expectRevert("Coordinator: unknown HTLC");
@@ -383,9 +395,13 @@ contract HTLCCollabRefundTest is Test {
     function test_collabRefundAndExecute_wrongDepositorSig_reverts() public {
         _aliceSwapAndLock();
 
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
         // Bob signs the depositor sig (wrong — alice is depositor)
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(bobPk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            bobPk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -399,8 +415,6 @@ contract HTLCCollabRefundTest is Test {
             0
         );
 
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
-
         vm.prank(relay);
         vm.expectRevert("Coordinator: invalid depositor signature");
         coordinator.collabRefundAndExecute(
@@ -411,8 +425,12 @@ contract HTLCCollabRefundTest is Test {
     function test_collabRefundAndExecute_wrongClaimSig_reverts() public {
         _aliceSwapAndLock();
 
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         // Alice signs the claim sig (wrong — bob is claimAddress)
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             alicePk,
@@ -427,8 +445,6 @@ contract HTLCCollabRefundTest is Test {
             0
         );
 
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
-
         vm.prank(relay);
         vm.expectRevert("HTLC: swap not found");
         coordinator.collabRefundAndExecute(
@@ -439,8 +455,12 @@ contract HTLCCollabRefundTest is Test {
     function test_collabRefund_doubleSpend_reverts() public {
         _aliceSwapAndLock();
 
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+        bytes32 callsHash = _computeCallsHash(calls);
+
+        (uint8 dV, bytes32 dR, bytes32 dS) = _signCollabRefund(
+            alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0, callsHash
+        );
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
             bobPk,
             preimageHash,
@@ -453,8 +473,6 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
-
-        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(relay);
         coordinator.collabRefundAndExecute(
@@ -568,6 +586,11 @@ contract HTLCCollabRefundTest is Test {
         return bytes.concat(r, s, bytes1(v));
     }
 
+    function _computeCallsHash(HTLCCoordinator.Call[] memory calls) internal pure returns (bytes32) {
+        bytes memory callsData = abi.encode(calls);
+        return keccak256(callsData);
+    }
+
     function _signHTLCRefund(
         uint256 pk,
         bytes32 _preimageHash,
@@ -612,7 +635,8 @@ contract HTLCCollabRefundTest is Test {
         uint256 _timelock,
         address caller,
         address sweepToken,
-        uint256 minAmountOut
+        uint256 minAmountOut,
+        bytes32 callsHash
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 digest = keccak256(
             abi.encodePacked(
@@ -628,7 +652,8 @@ contract HTLCCollabRefundTest is Test {
                         _timelock,
                         caller,
                         sweepToken,
-                        minAmountOut
+                        minAmountOut,
+                        callsHash
                     )
                 )
             )
