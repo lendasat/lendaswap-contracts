@@ -192,14 +192,14 @@ contract HTLCCollabRefundTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // Coordinator.collabRefundTo — simple direct refund
+    // Coordinator.collabRefundAndExecute — direct refund (no calls)
     // ---------------------------------------------------------------
 
-    function test_collabRefundTo() public {
+    function test_collabRefundAndExecute_direct() public {
         // Alice funds via coordinator (swap-and-lock)
         _aliceSwapAndLock();
 
-        // Both sign for collabRefundTo
+        // Both sign for collabRefundAndExecute (sweepToken=wbtc, minAmountOut=0)
         (uint8 dV, bytes32 dR, bytes32 dS) =
             _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
@@ -215,17 +215,20 @@ contract HTLCCollabRefundTest is Test {
             0
         );
 
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
         uint256 aliceBefore = wbtc.balanceOf(alice);
 
         vm.prank(relay);
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
+        );
 
         assertEq(wbtc.balanceOf(alice), aliceBefore + wbtcAmount, "alice should get WBTC back");
         assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
         assertEq(wbtc.balanceOf(address(coordinator)), 0, "coordinator should be empty");
     }
 
-    function test_collabRefundTo_beforeTimelock() public {
+    function test_collabRefundAndExecute_direct_beforeTimelock() public {
         _aliceSwapAndLock();
 
         assertLt(block.timestamp, timelock, "should be before timelock");
@@ -245,10 +248,14 @@ contract HTLCCollabRefundTest is Test {
             0
         );
 
-        vm.prank(relay);
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
-        assertEq(wbtc.balanceOf(address(htlc)), 0, "htlc should be empty");
+        vm.prank(relay);
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
+        );
+
+        assertEq(wbtc.balanceOf(address(htlc)), 0, "should succeed before timelock");
     }
 
     // ---------------------------------------------------------------
@@ -348,7 +355,7 @@ contract HTLCCollabRefundTest is Test {
     // Error cases
     // ---------------------------------------------------------------
 
-    function test_collabRefundTo_unknownHTLC_reverts() public {
+    function test_collabRefundAndExecute_unknownHTLC_reverts() public {
         (uint8 dV, bytes32 dR, bytes32 dS) =
             _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
@@ -363,63 +370,20 @@ contract HTLCCollabRefundTest is Test {
             address(wbtc),
             0
         );
+
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
 
         vm.prank(relay);
         vm.expectRevert("Coordinator: unknown HTLC");
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
-    }
-
-    function test_collabRefundTo_wrongDepositorSig_reverts() public {
-        _aliceSwapAndLock();
-
-        // Bob signs the depositor sig (wrong — alice is depositor)
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(bobPk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
-        (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
-            bobPk,
-            preimageHash,
-            wbtcAmount,
-            address(wbtc),
-            address(coordinator),
-            timelock,
-            address(coordinator),
-            alice,
-            address(wbtc),
-            0
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
         );
-
-        vm.prank(relay);
-        vm.expectRevert("Coordinator: invalid depositor signature");
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
-    }
-
-    function test_collabRefundTo_wrongClaimSig_reverts() public {
-        _aliceSwapAndLock();
-
-        (uint8 dV, bytes32 dR, bytes32 dS) =
-            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
-        // Alice signs the claim sig (wrong — bob is claimAddress)
-        (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
-            alicePk,
-            preimageHash,
-            wbtcAmount,
-            address(wbtc),
-            address(coordinator),
-            timelock,
-            address(coordinator),
-            alice,
-            address(wbtc),
-            0
-        );
-
-        vm.prank(relay);
-        vm.expectRevert("HTLC: swap not found");
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
     }
 
     function test_collabRefundAndExecute_wrongDepositorSig_reverts() public {
         _aliceSwapAndLock();
 
+        // Bob signs the depositor sig (wrong — alice is depositor)
         (uint8 dV, bytes32 dR, bytes32 dS) =
             _signCollabRefund(bobPk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
         (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
@@ -444,6 +408,34 @@ contract HTLCCollabRefundTest is Test {
         );
     }
 
+    function test_collabRefundAndExecute_wrongClaimSig_reverts() public {
+        _aliceSwapAndLock();
+
+        (uint8 dV, bytes32 dR, bytes32 dS) =
+            _signCollabRefund(alicePk, preimageHash, wbtcAmount, address(wbtc), bob, timelock, relay, address(wbtc), 0);
+        // Alice signs the claim sig (wrong — bob is claimAddress)
+        (uint8 cV, bytes32 cR, bytes32 cS) = _signHTLCRefund(
+            alicePk,
+            preimageHash,
+            wbtcAmount,
+            address(wbtc),
+            address(coordinator),
+            timelock,
+            address(coordinator),
+            alice,
+            address(wbtc),
+            0
+        );
+
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+
+        vm.prank(relay);
+        vm.expectRevert("HTLC: swap not found");
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
+        );
+    }
+
     function test_collabRefund_doubleSpend_reverts() public {
         _aliceSwapAndLock();
 
@@ -462,13 +454,19 @@ contract HTLCCollabRefundTest is Test {
             0
         );
 
+        HTLCCoordinator.Call[] memory calls = new HTLCCoordinator.Call[](0);
+
         vm.prank(relay);
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
+        );
 
         // Try again — should fail (deposit already cleared)
         vm.prank(relay);
         vm.expectRevert("Coordinator: unknown HTLC");
-        coordinator.collabRefundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock, dV, dR, dS, cV, cR, cS);
+        coordinator.collabRefundAndExecute(
+            preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
+        );
     }
 
     // ---------------------------------------------------------------
