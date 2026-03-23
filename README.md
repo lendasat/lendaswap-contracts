@@ -1,46 +1,49 @@
 # Lendaswap Atomic Swap Smart Contracts
 
-Smart contracts for atomic swaps between Bitcoin (via Lightning or Arkade) and Polygon tokens using Hash Time Locked
-Contracts (HTLCs).
+Smart contracts for atomic swaps between Bitcoin (via Lightning, Arkade, or on-chain) and EVM tokens using Hash Time
+Locked Contracts (HTLCs). Deployed on Polygon, Ethereum, and Arbitrum.
 
 ## Features
 
 - **HTLC-based Atomic Swaps**: Trustless swaps using hash locks and timelocks
-- **Uniswap V3 Integration**: Automatic token swapping on Polygon
-- **Gasless Transactions**: ERC-2771 meta-transaction support for gasless execution
-- **Security**: Built with OpenZeppelin contracts, ReentrancyGuard, and SafeERC20
+- **Multi-chain**: Deployed on Polygon, Ethereum, and Arbitrum
+- **DEX Integration**: Arbitrary call execution for on-chain token swaps (e.g., Uniswap V3)
+- **Gasless Transactions**: EIP-712 signature-based redeem/refund (no gas needed for the claimer)
+- **Permit2 Support**: Gasless token approvals via Uniswap Permit2
+- **Security**: OpenZeppelin SafeERC20, transient-storage reentrancy guard (EIP-1153)
 
 ## Contracts
 
-### AtomicSwapHTLC
+### HTLCErc20
 
-**Purpose**: Convert Bitcoin to any Polygon token (e.g., Bitcoin → USDC)
+**Purpose**: Lock and release ERC20 tokens in a hash time-locked swap.
 
-This contract locks WBTC tokens and swaps them to a desired token when claimed:
+Minimal storage design — only a single `bool` per swap. All parameters are verified via hash on redeem/refund.
 
-1. **Create**: User locks WBTC with a hash lock and timelock
-2. **Claim**: Recipient reveals secret → WBTC is swapped to desired token (e.g., USDC) via Uniswap → Tokens sent to
-   recipient
-3. **Refund**: If not claimed, sender can recover their WBTC after timelock expires
+1. **Create**: Lock ERC20 tokens with a preimage hash and timelock
+2. **Redeem**: Claim address reveals preimage to unlock tokens (supports EIP-712 signatures)
+3. **Refund**: Sender reclaims tokens after timelock expiry (supports EIP-712 signatures)
 
-### ReverseAtomicSwapHTLC
+### HTLCCoordinator
 
-**Purpose**: Convert any Polygon token to Bitcoin (e.g., USDC → Bitcoin)
+**Purpose**: Compose arbitrary calls (e.g., DEX swaps) with HTLC create/redeem/refund in a single transaction.
 
-This contract locks any token and swaps to WBTC when claimed:
+Three primary flows:
 
-1. **Create**: User locks tokens (e.g., USDC) with a hash lock and timelock
-2. **Claim**: Recipient reveals secret → Tokens swapped to WBTC via Uniswap → WBTC sent to recipient
-3. **Refund**: If not claimed, sender can recover their tokens after timelock expires
+1. **executeAndCreate**: Run arbitrary calls (e.g., swap USDC to WBTC via Uniswap), then lock the resulting tokens in an
+   HTLC. Uses Permit2 for gasless token approvals.
+2. **redeemAndExecute**: Redeem tokens from an HTLC via EIP-712 signature, run arbitrary calls (e.g., swap WBTC to
+   USDC), then sweep the result to the caller.
+3. **refundAndExecute**: Refund an expired HTLC, run arbitrary calls (e.g., swap back to original token), then sweep to
+   the original depositor.
 
 ### Key Parameters
 
-- `swapId`: Unique identifier for the swap
-- `hashLock`: SHA-256 hash of the secret (shared between both chains)
+- `preimageHash`: SHA-256 hash of the secret (compatible with Bitcoin HTLC scripts)
 - `timelock`: Unix timestamp after which refund is possible
-- `tokenIn`: Token to lock
-- `tokenOut`: Token to receive after swap
-- `poolFee`: Uniswap V3 pool fee tier (500/3000/10000)
+- `token`: ERC20 token address to lock
+- `claimAddress`: Address authorized to redeem (prevents front-running)
+- `refundAddress`: Address that can reclaim after timelock
 
 ## Prerequisites
 
@@ -73,7 +76,6 @@ Required environment variables:
 ```bash
 RPC_URL=your_polygon_rpc_url
 PRIVATE_KEY=your_private_key_for_deployment
-UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564  # Polygon
 ```
 
 ## Testing
@@ -84,122 +86,66 @@ Run all tests:
 forge test
 ```
 
-Run specific test:
-
-```bash
-forge test --match-test testClaimSwap -vvv
-```
-
-Run with gas reporting:
-
-```bash
-forge test --gas-report
-```
-
-### E2E Rust Tests
-
-End-to-end integration tests using `alloy-rs`:
-
-```bash
-cd tests
-./run_tests.sh -- --nocapture
-```
-
-The E2E test suite covers:
-
-- Local blockchain setup (Anvil)
-- Contract deployment
-- Complete swap lifecycle (create → claim)
-- Uniswap integration
-- Token transfers
-
-## Deployment
-
-### Deploy to Polygon Testnet (Mumbai)
-
-```bash
-forge script script/DeployHTLC.s.sol:DeployHTLC \
-  --rpc-url $RPC_URL \
-  --broadcast \
-  --verify
-```
-
-### Deploy to Polygon Mainnet
-
-```bash
-forge script script/DeployHTLC.s.sol:DeployHTLC \
-  --rpc-url $RPC_URL \
-  --broadcast \
-  --verify \
-  --chain-id 137
-```
-
-Deployment addresses will be saved to `deployments.json`.
-
 ## Gasless Execution
 
-The contract supports **ERC-2771 meta-transactions** via the deployed `ERC2771Forwarder`. This allows users to claim
-swaps **without holding POL** for gas fees - perfect for your Bitcoin↔Polygon bridge where users shouldn't need to buy
-gas tokens.
+Both contracts support **EIP-712 signature-based** gasless execution. Users sign a typed message off-chain, and a
+relayer submits the transaction and pays gas.
 
 ### How It Works
 
 ```
-User signs meta-tx → Submit to Relayer → Relayer executes & pays gas → User receives tokens
-     (off-chain, free)      (Gelato API)        (on-chain)               (no POL needed!)
+User signs EIP-712 msg → Submit to Relayer → Relayer executes & pays gas → User receives tokens
+      (off-chain, free)                            (on-chain)                (no gas needed!)
 ```
 
-### Testing Gasless Execution
+- **HTLCErc20**: Redeem and refund both accept EIP-712 signatures, allowing a third party to submit on behalf of the
+  user.
+- **HTLCCoordinator**: Uses Permit2 for gasless token approvals on `executeAndCreate`.
 
-Run the E2E gasless swap test:
+### Testing Gasless Execution
 
 ```bash
 cd tests
 ./run_tests.sh --test e2e_gasless_swap -- --nocapture
 ```
 
-This demonstrates the complete flow:
-
-- User signs EIP-712 meta-transaction (no gas)
-- Relayer executes via `ERC2771Forwarder`
-- User receives tokens without spending any ETH/POL
-
 See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for implementation details.
 
 ## Security Considerations
 
-1. **Secret Management**:
-   - Keep the secret secure until ready to claim
-   - Use cryptographically secure random generation for secrets
-   - Hash with SHA-256 (same as Bitcoin)
-
-2. **Timelock Values**:
-   - Choose timelocks long enough for users to claim
-   - Typical: 1-24 hours depending on use case
-   - Coordinate with Bitcoin-side timelock (should be longer on Bitcoin)
-
-3. **Slippage Protection**:
-   - Current implementation has `amountOutMinimum: 0`
-   - For production, calculate and set proper slippage limits
-   - Consider using Uniswap's QuoterV2 for price checks
-
-4. **Approvals**:
-   - Users must approve the HTLC contract before creating swaps
-   - The contract approves the Uniswap router during claims
+1. **Secret Management**: Use cryptographically secure random generation. Hash with SHA-256 (same as Bitcoin).
+2. **Timelock Values**: Coordinate with Bitcoin-side timelock (should be longer on Bitcoin). Typical: 1-24 hours.
+3. **Slippage Protection**: Set proper `minAmountOut` when using the coordinator with DEX calls.
+4. **Front-running**: `claimAddress` is part of the swap key — only that address can redeem.
 
 ## Contract Addresses
 
-### Polygon Mainnet
+### Polygon (Chain ID: 137)
 
-- HTLC:
-  - [0x5cead362b83bf96795d48e1c4ba9fda80920ce21](https://polygonscan.com/address/0x5cead362b83bf96795d48e1c4ba9fda80920ce21)
-- Reverse HTLC:
-  - [0xc4827aF7Ba7A78Ff58d7988A84D455eDdcfb528F](https://polygonscan.com/address/0xc4827aF7Ba7A78Ff58d7988A84D455eDdcfb528F)
+- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://polygonscan.com/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
+- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://polygonscan.com/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+
+Tokens:
 
 - WBTC: `0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6`
-- USDC: `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359`
-- USDT0: `0xc2132D05D31c914a87C6611C10748AEb04B58e8F`
-- Uniswap V3 Router: `0xE592427A0AEce92De3Edee1F18E0157C05861564`
+
+### Ethereum (Chain ID: 1)
+
+- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://etherscan.io/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
+- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://etherscan.io/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+
+Tokens:
+
+- tBTC: `0x18084fba666a33d37592fa2633fd49a74dd93a88`
+
+### Arbitrum (Chain ID: 42161)
+
+- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://arbiscan.io/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
+- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://arbiscan.io/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+
+Tokens:
+
+- tBTC: `0x6c84a8f1c29108F47a79964b5Fe888D4f4D0dE40`
 
 ## License
 
