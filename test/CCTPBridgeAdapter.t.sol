@@ -6,7 +6,6 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CCTPBridgeAdapter} from "../src/CCTPBridgeAdapter.sol";
 import {ITokenMessenger} from "../src/interfaces/ITokenMessenger.sol";
-import {IMessageTransmitter} from "../src/interfaces/IMessageTransmitter.sol";
 
 // -- Mock contracts --
 
@@ -47,7 +46,6 @@ contract MockTokenMessenger is ITokenMessenger {
     ) external returns (uint64 nonce) {
         require(burnToken == usdc, "MockTokenMessenger: wrong token");
 
-        // Simulate burn by transferring USDC from caller to this contract
         IERC20(usdc).transferFrom(msg.sender, address(this), amount);
 
         lastAmount = amount;
@@ -108,36 +106,11 @@ contract MockTokenMessenger is ITokenMessenger {
     }
 }
 
-contract MockMessageTransmitter is IMessageTransmitter {
-    address public usdc;
-    uint256 public mintAmount;
-
-    constructor(address _usdc) {
-        usdc = _usdc;
-    }
-
-    /// @dev Set how much USDC to mint on the next receiveMessage call
-    function setMintAmount(uint256 amount) external {
-        mintAmount = amount;
-    }
-
-    function receiveMessage(bytes calldata, bytes calldata) external returns (bool) {
-        // Simulate minting USDC to msg.sender (the adapter)
-        MockUSDC(usdc).transfer(msg.sender, mintAmount);
-        return true;
-    }
-
-    function localDomain() external pure returns (uint32) {
-        return 7; // Polygon
-    }
-}
-
 // -- Tests --
 
 contract CCTPBridgeAdapterTest is Test {
     MockUSDC usdc;
     MockTokenMessenger tokenMessenger;
-    MockMessageTransmitter messageTransmitter;
     CCTPBridgeAdapter adapter;
 
     address alice = makeAddr("alice");
@@ -146,154 +119,70 @@ contract CCTPBridgeAdapterTest is Test {
     function setUp() public {
         usdc = new MockUSDC();
         tokenMessenger = new MockTokenMessenger(address(usdc));
-        messageTransmitter = new MockMessageTransmitter(address(usdc));
 
         adapter = new CCTPBridgeAdapter(
             address(tokenMessenger),
-            address(messageTransmitter),
             address(usdc)
         );
 
         // Fund alice with USDC
         usdc.transfer(alice, 100_000e6);
-
-        // Fund messageTransmitter with USDC (simulates minting capability)
-        usdc.transfer(address(messageTransmitter), 1_000_000e6);
     }
 
-    // -- bridge() tests --
+    // -- version --
 
-    function test_bridge_success() public {
-        uint256 amount = 1000e6;
-        uint32 destDomain = 0; // Ethereum
+    function test_version() public view {
+        assertEq(keccak256(bytes(adapter.VERSION())), keccak256(bytes("2")));
+    }
+
+    // -- bridgeBalance() tests --
+
+    function test_bridgeBalance_success() public {
         bytes32 recipient = adapter.addressToBytes32(bob);
 
         vm.startPrank(alice);
-        usdc.approve(address(adapter), amount);
-        uint64 nonce = adapter.bridge(amount, destDomain, recipient);
+        usdc.approve(address(adapter), type(uint256).max);
+
+        adapter.bridgeBalance(0, recipient, 200_000);
         vm.stopPrank();
 
-        assertEq(nonce, 1);
-        assertEq(tokenMessenger.lastAmount(), amount);
-        assertEq(tokenMessenger.lastDestinationDomain(), destDomain);
+        assertEq(tokenMessenger.lastAmount(), 100_000e6);
         assertEq(tokenMessenger.lastMintRecipient(), recipient);
-        assertEq(usdc.balanceOf(alice), 100_000e6 - amount);
+        assertEq(usdc.balanceOf(alice), 0);
     }
 
-    function test_bridge_emits_event() public {
-        uint256 amount = 500e6;
-        uint32 destDomain = 3; // Arbitrum
+    function test_bridgeBalance_emits_event() public {
         bytes32 recipient = adapter.addressToBytes32(bob);
 
         vm.startPrank(alice);
-        usdc.approve(address(adapter), amount);
+        usdc.approve(address(adapter), type(uint256).max);
 
-        vm.expectEmit(true, true, true, true);
-        emit CCTPBridgeAdapter.BridgeInitiated(1, destDomain, recipient, amount, alice);
+        vm.expectEmit(true, true, false, true);
+        emit CCTPBridgeAdapter.BridgeInitiated(3, recipient, 100_000e6, alice);
 
-        adapter.bridge(amount, destDomain, recipient);
+        adapter.bridgeBalance(3, recipient, 200_000);
         vm.stopPrank();
     }
 
-    function test_bridge_reverts_zero_amount() public {
-        bytes32 recipient = adapter.addressToBytes32(bob);
-        vm.prank(alice);
-        vm.expectRevert(CCTPBridgeAdapter.ZeroAmount.selector);
-        adapter.bridge(0, 0, recipient);
-    }
-
-    function test_bridge_reverts_zero_recipient() public {
+    function test_bridgeBalance_reverts_zero_recipient() public {
         vm.startPrank(alice);
-        usdc.approve(address(adapter), 1000e6);
+        usdc.approve(address(adapter), type(uint256).max);
 
         vm.expectRevert(CCTPBridgeAdapter.ZeroRecipient.selector);
-        adapter.bridge(1000e6, 0, bytes32(0));
+        adapter.bridgeBalance(0, bytes32(0), 200_000);
         vm.stopPrank();
     }
 
-    function test_bridge_multiple_nonces() public {
+    function test_bridgeBalance_reverts_zero_balance() public {
+        address broke = makeAddr("broke");
         bytes32 recipient = adapter.addressToBytes32(bob);
 
-        vm.startPrank(alice);
-        usdc.approve(address(adapter), 2000e6);
+        vm.startPrank(broke);
+        usdc.approve(address(adapter), type(uint256).max);
 
-        uint64 nonce1 = adapter.bridge(1000e6, 0, recipient);
-        uint64 nonce2 = adapter.bridge(1000e6, 3, recipient);
-        vm.stopPrank();
-
-        assertEq(nonce1, 1);
-        assertEq(nonce2, 2);
-    }
-
-    // -- bridgeWithCaller() tests --
-
-    function test_bridgeWithCaller_success() public {
-        uint256 amount = 1000e6;
-        uint32 destDomain = 0;
-        bytes32 recipient = adapter.addressToBytes32(bob);
-        bytes32 destCaller = adapter.addressToBytes32(alice);
-
-        vm.startPrank(alice);
-        usdc.approve(address(adapter), amount);
-        uint64 nonce = adapter.bridgeWithCaller(amount, destDomain, recipient, destCaller);
-        vm.stopPrank();
-
-        assertEq(nonce, 1);
-        assertEq(tokenMessenger.lastDestinationCaller(), destCaller);
-    }
-
-    function test_bridgeWithCaller_reverts_zero_amount() public {
-        bytes32 recipient = adapter.addressToBytes32(bob);
-        vm.prank(alice);
         vm.expectRevert(CCTPBridgeAdapter.ZeroAmount.selector);
-        adapter.bridgeWithCaller(0, 0, recipient, bytes32(0));
-    }
-
-    // -- receiveAndForward() tests --
-
-    function test_receiveAndForward_success() public {
-        uint256 amount = 5000e6;
-        messageTransmitter.setMintAmount(amount);
-
-        uint256 bobBefore = usdc.balanceOf(bob);
-
-        adapter.receiveAndForward(
-            hex"deadbeef", // mock message
-            hex"cafebabe", // mock attestation
-            bob,
-            amount
-        );
-
-        assertEq(usdc.balanceOf(bob), bobBefore + amount);
-    }
-
-    function test_receiveAndForward_emits_event() public {
-        uint256 amount = 2000e6;
-        messageTransmitter.setMintAmount(amount);
-
-        bytes memory message = hex"deadbeef";
-
-        vm.expectEmit(true, false, false, true);
-        emit CCTPBridgeAdapter.BridgeReceived(keccak256(message), bob, amount);
-
-        adapter.receiveAndForward(message, hex"cafebabe", bob, amount);
-    }
-
-    function test_receiveAndForward_reverts_insufficient_mint() public {
-        messageTransmitter.setMintAmount(999e6);
-
-        vm.expectRevert("CCTPBridgeAdapter: insufficient mint");
-        adapter.receiveAndForward(hex"deadbeef", hex"cafebabe", bob, 1000e6);
-    }
-
-    function test_receiveAndForward_extra_amount_forwarded() public {
-        // Mint more than expected — all should be forwarded
-        messageTransmitter.setMintAmount(1500e6);
-
-        uint256 bobBefore = usdc.balanceOf(bob);
-        adapter.receiveAndForward(hex"aa", hex"bb", bob, 1000e6);
-
-        assertEq(usdc.balanceOf(bob), bobBefore + 1500e6);
+        adapter.bridgeBalance(0, recipient, 200_000);
+        vm.stopPrank();
     }
 
     // -- View helper tests --
@@ -315,17 +204,5 @@ contract CCTPBridgeAdapterTest is Test {
         bytes32 asBytes = adapter.addressToBytes32(original);
         address recovered = adapter.bytes32ToAddress(asBytes);
         assertEq(recovered, original);
-    }
-
-    // -- Domain constant tests --
-
-    function test_domain_constants() public view {
-        assertEq(adapter.DOMAIN_ETHEREUM(), 0);
-        assertEq(adapter.DOMAIN_AVALANCHE(), 1);
-        assertEq(adapter.DOMAIN_OPTIMISM(), 2);
-        assertEq(adapter.DOMAIN_ARBITRUM(), 3);
-        assertEq(adapter.DOMAIN_SOLANA(), 5);
-        assertEq(adapter.DOMAIN_BASE(), 6);
-        assertEq(adapter.DOMAIN_POLYGON(), 7);
     }
 }
