@@ -167,7 +167,7 @@ contract HTLCCoordinator {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external nonReentrant {
+    ) external payable nonReentrant {
         // HTLC.redeemBySig recovers claimAddress from the signature and sends tokens
         // to msg.sender (this coordinator). The signature includes address(this) as
         // caller, destination, sweepToken, and minAmountOut — no separate claimAddress
