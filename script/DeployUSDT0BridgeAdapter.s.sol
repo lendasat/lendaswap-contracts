@@ -26,8 +26,10 @@ contract DeployUSDT0BridgeAdapter is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        USDT0BridgeAdapter adapter = new USDT0BridgeAdapter{salt: salt}(USDT0_TOKEN_ARBITRUM, USDT0_OFT_ARBITRUM);
+        address deployer = vm.addr(deployerPrivateKey);
+        USDT0BridgeAdapter adapter = new USDT0BridgeAdapter{salt: salt}(USDT0_TOKEN_ARBITRUM, USDT0_OFT_ARBITRUM, deployer);
         console.log("USDT0BridgeAdapter deployed at:", address(adapter));
+        console.log("Owner:", adapter.owner());
 
         vm.stopBroadcast();
     }

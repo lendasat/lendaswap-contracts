@@ -24,13 +24,14 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 contract USDT0BridgeAdapter {
     using SafeERC20 for IERC20;
 
-    string public constant VERSION = "4";
+    string public constant VERSION = "5";
 
     // -- Errors --
 
     error ZeroAmount();
     error ZeroRecipient();
     error InsufficientEthForFee(uint256 required, uint256 available);
+    error NotOwner();
 
     // -- Events --
 
@@ -48,15 +49,22 @@ contract USDT0BridgeAdapter {
     IERC20 public immutable USDT0_TOKEN;
     /// The USDT0 OFT/OFTAdapter contract (has quoteSend/send).
     IOFT public immutable USDT0_OFT;
+    /// Address that can withdraw accumulated ETH dust.
+    address public owner;
 
     // -- Constructor --
 
     /// @param usdt0Token Address of the USDT0 ERC20 token on this chain
     /// @param usdt0Oft Address of the USDT0 OFT/OFTAdapter on this chain
-    constructor(address usdt0Token, address usdt0Oft) {
+    /// @param _owner Address that can withdraw ETH and transfer ownership
+    constructor(address usdt0Token, address usdt0Oft, address _owner) {
         USDT0_TOKEN = IERC20(usdt0Token);
         USDT0_OFT = IOFT(usdt0Oft);
+        owner = _owner;
     }
+
+    /// @notice Accept ETH (LayerZero refunds excess here).
+    receive() external payable {}
 
     // -- External functions --
 
@@ -99,17 +107,28 @@ contract USDT0BridgeAdapter {
             revert InsufficientEthForFee(fee.nativeFee, msg.value);
         }
 
-        // Bridge via OFT — locks token on source, mints on destination
-        USDT0_OFT.send{value: fee.nativeFee}(sendParam, fee, msg.sender);
-
-        // Refund excess ETH to caller
-        uint256 refund = msg.value - fee.nativeFee;
-        if (refund > 0) {
-            (bool success,) = msg.sender.call{value: refund}("");
-            require(success, "ETH refund failed");
-        }
+        // Bridge via OFT — locks token on source, mints on destination.
+        // OFT requires msg.value == fee.nativeFee (exact match), so we send
+        // exactly the quoteSend fee. Any excess ETH from the coordinator's
+        // deterministic estimate stays in the adapter and can be withdrawn.
+        USDT0_OFT.send{value: fee.nativeFee}(sendParam, fee, address(this));
 
         emit BridgeInitiated(dstEid, to, amount, fee.nativeFee, msg.sender);
+    }
+
+    // -- Owner functions --
+
+    /// @notice Withdraw accumulated ETH dust from LayerZero fee refunds.
+    function withdraw(address to) external {
+        if (msg.sender != owner) revert NotOwner();
+        (bool success,) = to.call{value: address(this).balance}("");
+        require(success, "ETH transfer failed");
+    }
+
+    /// @notice Transfer ownership to a new address.
+    function transferOwnership(address newOwner) external {
+        if (msg.sender != owner) revert NotOwner();
+        owner = newOwner;
     }
 
     // -- View helpers --

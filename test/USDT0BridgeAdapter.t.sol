@@ -42,7 +42,7 @@ contract MockOFT is IOFT {
         return MessagingFee({nativeFee: mockNativeFee, lzTokenFee: 0});
     }
 
-    function send(SendParam calldata _sendParam, MessagingFee calldata _fee, address)
+    function send(SendParam calldata _sendParam, MessagingFee calldata _fee, address _refundAddress)
         external
         payable
         returns (MessagingReceipt memory, OFTReceipt memory)
@@ -53,7 +53,14 @@ contract MockOFT is IOFT {
         lastAmountLD = _sendParam.amountLD;
         lastDstEid = _sendParam.dstEid;
         lastTo = _sendParam.to;
-        lastNativeFee = msg.value;
+        lastNativeFee = _fee.nativeFee;
+
+        // Simulate LZ refund: return excess ETH to refund address
+        uint256 refund = msg.value - _fee.nativeFee;
+        if (refund > 0) {
+            (bool success,) = _refundAddress.call{value: refund}("");
+            require(success, "MockOFT: refund failed");
+        }
 
         return (
             MessagingReceipt({guid: bytes32(0), nonce: 1, fee: _fee}),
@@ -103,7 +110,7 @@ contract USDT0BridgeAdapterTest is Test {
     function setUp() public {
         usdt0 = new MockUSDT0();
         oft = new MockOFT(address(usdt0));
-        adapter = new USDT0BridgeAdapter(address(usdt0), address(oft));
+        adapter = new USDT0BridgeAdapter(address(usdt0), address(oft), address(this));
         caller = new TestCaller(adapter, IERC20(address(usdt0)));
 
         // Fund caller contract with USDT0 and ETH
@@ -114,7 +121,7 @@ contract USDT0BridgeAdapterTest is Test {
     // -- version --
 
     function test_version() public view {
-        assertEq(keccak256(bytes(adapter.VERSION())), keccak256(bytes("4")));
+        assertEq(keccak256(bytes(adapter.VERSION())), keccak256(bytes("5")));
     }
 
     // -- bridgeBalance() success --
@@ -148,19 +155,17 @@ contract USDT0BridgeAdapterTest is Test {
 
     // -- bridgeBalance() refunds excess ETH --
 
-    function test_bridgeBalance_refunds_excess_eth() public {
+    function test_bridgeBalance_excess_eth_accumulates_in_adapter() public {
         bytes32 recipient = adapter.addressToBytes32(bob);
 
-        // Adapter should have 0 ETH before and after (it forwards everything)
         assertEq(address(adapter).balance, 0);
 
         caller.callBridge{value: 0.1 ether}(DST_EID_OPTIMISM, recipient);
 
-        // Adapter keeps no ETH — excess was refunded to caller
-        assertEq(address(adapter).balance, 0);
-        // Caller got the refund (0.1 ETH - mockNativeFee sent to OFT)
-        // The remaining ETH is on the caller, not the adapter
-        assertGt(address(caller).balance, 0.9 ether);
+        // Excess ETH accumulates in adapter (LZ refunds to adapter, not coordinator)
+        // This prevents ETH from being trapped in the coordinator which can't sweep ETH.
+        uint256 excess = 0.1 ether - oft.mockNativeFee();
+        assertEq(address(adapter).balance, excess);
     }
 
     // -- bridgeBalance() emits event --
