@@ -13,8 +13,8 @@ import {IOFT, SendParam, MessagingFee} from "./interfaces/IOFT.sol";
 ///               (e.g. 0x14E4A1B1...on Arbitrum)
 ///
 ///      Flow:
-///        1. Coordinator redeems HTLC → WBTC lands in coordinator
-///        2. DEX swap: WBTC → USDT0 token (output stays in coordinator)
+///        1. Coordinator redeems HTLC → TBTC lands in coordinator
+///        2. DEX swap: TBTC → USDT0 token (output stays in coordinator)
 ///        3. Coordinator calls this adapter's `bridgeBalance()` via Call[]
 ///        4. Adapter pulls USDT0 token, approves OFT, calls OFT send()
 ///        5. LayerZero delivers USDT0 on destination chain
