@@ -84,6 +84,7 @@ contract USDT0BridgeAdapter {
         uint256 amount = USDT0_TOKEN.balanceOf(msg.sender);
         if (amount == 0) revert ZeroAmount();
 
+        // Transfer funds from Coordinator contract (msg.sender) into this contract.
         USDT0_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
 
         // Approve the OFT contract to spend tokens (OFTAdapter uses transferFrom internally)
