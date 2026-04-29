@@ -116,6 +116,10 @@ contract CCTPBridgeAdapterTest is Test {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
 
+    // Bare 32-byte "cctp-forward" magic — Circle's standard forwarding hookData.
+    bytes constant FORWARD_HOOK_32 =
+        hex"636374702d666f72776172640000000000000000000000000000000000000000";
+
     function setUp() public {
         usdc = new MockUSDC();
         tokenMessenger = new MockTokenMessenger(address(usdc));
@@ -132,7 +136,7 @@ contract CCTPBridgeAdapterTest is Test {
     // -- version --
 
     function test_version() public view {
-        assertEq(keccak256(bytes(adapter.VERSION())), keccak256(bytes("2")));
+        assertEq(keccak256(bytes(adapter.VERSION())), keccak256(bytes("3")));
     }
 
     // -- bridgeBalance() tests --
@@ -143,12 +147,35 @@ contract CCTPBridgeAdapterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(adapter), type(uint256).max);
 
-        adapter.bridgeBalance(0, recipient, 200_000);
+        adapter.bridgeBalance(0, recipient, 200_000, FORWARD_HOOK_32);
         vm.stopPrank();
 
         assertEq(tokenMessenger.lastAmount(), 100_000e6);
         assertEq(tokenMessenger.lastMintRecipient(), recipient);
         assertEq(usdc.balanceOf(alice), 0);
+    }
+
+    function test_bridgeBalance_accepts_solana_extended_hookdata() public {
+        // Solana ATA-creation forward payload: 28-byte cctp-forward prefix +
+        // 4-byte length (0x21) + 1-byte ATA flag + 32-byte wallet pubkey = 65.
+        bytes memory solanaHook = bytes.concat(
+            hex"636374702d666f727761726400000000000000000000000000000000",
+            hex"00000021",
+            hex"01",
+            hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        );
+        assertEq(solanaHook.length, 65);
+
+        // mintRecipient for Solana is the user's USDC ATA, not their wallet pubkey.
+        bytes32 ata = bytes32(uint256(0xdeadbeef));
+
+        vm.startPrank(alice);
+        usdc.approve(address(adapter), type(uint256).max);
+        adapter.bridgeBalance(5, ata, 250_000, solanaHook);
+        vm.stopPrank();
+
+        assertEq(tokenMessenger.lastDestinationDomain(), 5);
+        assertEq(tokenMessenger.lastMintRecipient(), ata);
     }
 
     function test_bridgeBalance_emits_event() public {
@@ -160,7 +187,7 @@ contract CCTPBridgeAdapterTest is Test {
         vm.expectEmit(true, true, false, true);
         emit CCTPBridgeAdapter.BridgeInitiated(3, recipient, 100_000e6, alice);
 
-        adapter.bridgeBalance(3, recipient, 200_000);
+        adapter.bridgeBalance(3, recipient, 200_000, FORWARD_HOOK_32);
         vm.stopPrank();
     }
 
@@ -169,7 +196,7 @@ contract CCTPBridgeAdapterTest is Test {
         usdc.approve(address(adapter), type(uint256).max);
 
         vm.expectRevert(CCTPBridgeAdapter.ZeroRecipient.selector);
-        adapter.bridgeBalance(0, bytes32(0), 200_000);
+        adapter.bridgeBalance(0, bytes32(0), 200_000, FORWARD_HOOK_32);
         vm.stopPrank();
     }
 
@@ -181,7 +208,25 @@ contract CCTPBridgeAdapterTest is Test {
         usdc.approve(address(adapter), type(uint256).max);
 
         vm.expectRevert(CCTPBridgeAdapter.ZeroAmount.selector);
-        adapter.bridgeBalance(0, recipient, 200_000);
+        adapter.bridgeBalance(0, recipient, 200_000, FORWARD_HOOK_32);
+        vm.stopPrank();
+    }
+
+    function test_bridgeBalance_reverts_invalid_hookdata_length() public {
+        bytes32 recipient = adapter.addressToBytes32(bob);
+
+        vm.startPrank(alice);
+        usdc.approve(address(adapter), type(uint256).max);
+
+        // 31 bytes — neither the bare 32-byte magic nor the 65-byte Solana payload.
+        bytes memory bad = hex"636374702d666f72776172640000000000000000000000000000000000000000ff";
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CCTPBridgeAdapter.InvalidHookDataLength.selector,
+                bad.length
+            )
+        );
+        adapter.bridgeBalance(0, recipient, 200_000, bad);
         vm.stopPrank();
     }
 

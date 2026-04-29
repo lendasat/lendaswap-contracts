@@ -18,12 +18,13 @@ import {ITokenMessenger} from "./interfaces/ITokenMessenger.sol";
 contract CCTPBridgeAdapter {
     using SafeERC20 for IERC20;
 
-    string public constant VERSION = "2";
+    string public constant VERSION = "3";
 
     // -- Errors --
 
     error ZeroAmount();
     error ZeroRecipient();
+    error InvalidHookDataLength(uint256 length);
 
     // -- Events --
 
@@ -54,18 +55,35 @@ contract CCTPBridgeAdapter {
     ///         Circle's Forwarding Service (gasless on destination chain).
     /// @dev Designed for the HTLCCoordinator Call[] flow:
     ///      1. Coordinator calls USDC.approve(adapter, type(uint256).max)
-    ///      2. Coordinator calls adapter.bridgeBalance(destDomain, recipient, maxFee)
+    ///      2. Coordinator calls adapter.bridgeBalance(destDomain, recipient, maxFee, hookData)
     ///      The adapter reads the caller's USDC balance, pulls it via transferFrom,
-    ///      and burns it via depositForBurnWithHook with forwarding service hookData.
+    ///      and burns it via depositForBurnWithHook with the supplied hookData.
+    ///
+    ///      Two `hookData` shapes are accepted today:
+    ///        * 32 bytes — bare "cctp-forward" magic for EVM destinations and for
+    ///          Solana destinations whose USDC ATA already exists.
+    ///        * 65 bytes — extended Solana forward payload that prepends an ATA-
+    ///          creation flag + wallet pubkey, used when the recipient's USDC
+    ///          token account doesn't exist yet on Solana. Circle's forwarder
+    ///          creates the ATA before the mint, paid out of the burn amount.
+    ///      The contract does not parse hookData — it's an opaque payload Circle's
+    ///      off-chain forwarder reads. Length-only validation keeps the surface
+    ///      narrow without coupling us to a specific format version.
     /// @param destinationDomain CCTP domain ID of the destination chain
-    /// @param mintRecipient Recipient address on destination chain (left-padded bytes32)
+    /// @param mintRecipient Recipient address on destination chain (left-padded bytes32 for EVM,
+    ///                      32-byte SPL ATA pubkey for Solana)
     /// @param maxFee Maximum CCTP forwarding fee in USDC units (fetched from IRIS API)
+    /// @param hookData Forwarding service payload (32 or 65 bytes — see above)
     function bridgeBalance(
         uint32 destinationDomain,
         bytes32 mintRecipient,
-        uint256 maxFee
+        uint256 maxFee,
+        bytes calldata hookData
     ) external {
         if (mintRecipient == bytes32(0)) revert ZeroRecipient();
+        if (hookData.length != 32 && hookData.length != 65) {
+            revert InvalidHookDataLength(hookData.length);
+        }
 
         // Pull caller's full USDC balance
         uint256 amount = IERC20(USDC).balanceOf(msg.sender);
@@ -75,9 +93,6 @@ contract CCTPBridgeAdapter {
 
         // Approve TokenMessenger V2
         IERC20(USDC).forceApprove(address(TOKEN_MESSENGER), amount);
-
-        // Forwarding service hookData: "cctp-forward" + version 0 + data length 0
-        bytes memory hookData = hex"636374702d666f72776172640000000000000000000000000000000000000000";
 
         // Burn via CCTP V2 with forwarding service — Circle auto-mints on destination
         TOKEN_MESSENGER.depositForBurnWithHook(
