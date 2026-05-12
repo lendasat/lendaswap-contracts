@@ -105,11 +105,13 @@ User signs EIP-712 msg → Submit to Relayer → Relayer executes & pays gas →
 ### Testing Gasless Execution
 
 ```bash
+cd contracts
+forge build
 cd tests
-./run_tests.sh --test e2e_gasless_swap -- --nocapture
+cargo test --test e2e_permit2_swap_lock_then_claim -- --nocapture
 ```
 
-See [`tests/tests/e2e_gasless_swap.rs`](tests/tests/e2e_gasless_swap.rs) for implementation details.
+See [`tests/tests/e2e_permit2_swap_lock_then_claim.rs`](tests/tests/e2e_permit2_swap_lock_then_claim.rs) for implementation details.
 
 ## Security Considerations
 
