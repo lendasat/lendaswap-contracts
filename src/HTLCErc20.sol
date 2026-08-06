@@ -14,9 +14,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract HTLCErc20 {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 3;
+    uint8 public constant VERSION = 4;
 
     // -- EIP-712 --
+    //
+    // The domain's version string tracks VERSION. Signers must use the same value,
+    // or the recovered claimAddress will not match and settlement reverts.
 
     bytes32 public constant TYPEHASH_REDEEM = keccak256(
         "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut,bytes32 callsHash)"
@@ -30,7 +33,7 @@ contract HTLCErc20 {
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256("HTLCErc20"),
-            keccak256("3"),
+            keccak256("4"),
             block.chainid,
             address(this)
         )
@@ -47,18 +50,22 @@ contract HTLCErc20 {
 
     // -- Events --
 
+    /// @dev `key` commits to every swap parameter and is a swap's unique identifier.
+    ///      `preimageHash` is not unique — any number of swaps may share one, each with
+    ///      its own terms. Consumers must match a swap on `key`, never on `preimageHash`.
     event SwapCreated(
         bytes32 indexed preimageHash,
         address indexed refundAddress,
         address indexed claimAddress,
         address token,
         uint256 amount,
-        uint256 timelock
+        uint256 timelock,
+        bytes32 key
     );
 
-    event SwapRedeemed(bytes32 indexed preimageHash, bytes32 preimage);
+    event SwapRedeemed(bytes32 indexed preimageHash, bytes32 indexed key, bytes32 preimage);
 
-    event SwapRefunded(bytes32 indexed preimageHash);
+    event SwapRefunded(bytes32 indexed preimageHash, bytes32 indexed key);
 
     // -- Reentrancy guard via transient storage (EIP-1153) --
 
@@ -138,7 +145,7 @@ contract HTLCErc20 {
 
         delete swaps[key];
 
-        emit SwapRedeemed(preimageHash, preimage);
+        emit SwapRedeemed(preimageHash, key, preimage);
 
         IERC20(token).safeTransfer(msg.sender, amount);
     }
@@ -195,7 +202,7 @@ contract HTLCErc20 {
 
         delete swaps[key];
 
-        emit SwapRedeemed(preimageHash, preimage);
+        emit SwapRedeemed(preimageHash, key, preimage);
 
         // Tokens go to msg.sender (the authorized caller), not claimAddress
         IERC20(token).safeTransfer(msg.sender, amount);
@@ -295,7 +302,7 @@ contract HTLCErc20 {
 
         delete swaps[key];
 
-        emit SwapRefunded(preimageHash);
+        emit SwapRefunded(preimageHash, key);
 
         // Tokens go to msg.sender (the authorized caller), not refundAddress
         IERC20(token).safeTransfer(msg.sender, amount);
@@ -343,7 +350,7 @@ contract HTLCErc20 {
 
         delete swaps[key];
 
-        emit SwapRefunded(preimageHash);
+        emit SwapRefunded(preimageHash, key);
     }
 
     function _create(
@@ -362,7 +369,7 @@ contract HTLCErc20 {
 
         swaps[key] = true;
 
-        emit SwapCreated(preimageHash, refundAddress, claimAddress, token, amount, timelock);
+        emit SwapCreated(preimageHash, refundAddress, claimAddress, token, amount, timelock, key);
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
     }
