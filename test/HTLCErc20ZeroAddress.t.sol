@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {HTLCErc20} from "../src/HTLCErc20.sol";
 
 contract MockToken is ERC20 {
@@ -13,10 +14,10 @@ contract MockToken is ERC20 {
 
 /// @notice A recovered signer authorises nothing until the recovery is known to have
 ///         succeeded, and no swap may name address(0) as either party.
-/// @dev `ecrecover` yields address(0) for a malformed signature rather than reverting, so
-///      a `*BySig` path that derives a swap key from the recovered address would derive a
-///      valid one for a swap whose claimAddress is address(0). Both layers are covered:
-///      such a swap cannot be created, and a failed recovery is rejected regardless.
+/// @dev A `*BySig` path derives its swap key from the recovered address, so a recovery
+///      that resolved to address(0) would derive a valid key for a swap whose claimAddress
+///      is address(0). Both layers are covered: such a swap cannot be created, and a
+///      recovery that does not succeed reverts rather than resolving to address(0).
 contract HTLCErc20ZeroAddressTest is Test {
     /// @dev `swaps` sits behind `Ownable2Step`'s `_owner` and `_pendingOwner`. Confirmed
     ///      with `forge inspect HTLCErc20 storage`; re-check it if the base changes, or
@@ -79,7 +80,7 @@ contract HTLCErc20ZeroAddressTest is Test {
         _aliceCreate(bob);
 
         vm.prank(eve);
-        vm.expectRevert("HTLC: invalid signature");
+        vm.expectRevert(ECDSA.ECDSAInvalidSignature.selector);
         htlc.refundBySig(
             preimageHash,
             amount,
@@ -91,7 +92,7 @@ contract HTLCErc20ZeroAddressTest is Test {
             0,
             27,
             bytes32(uint256(1)),
-            bytes32(0) // s = 0 is not a valid signature, so ecrecover returns address(0)
+            bytes32(0) // s = 0 has no valid recovery
         );
     }
 
@@ -99,7 +100,7 @@ contract HTLCErc20ZeroAddressTest is Test {
         _aliceCreate(bob);
 
         vm.prank(eve);
-        vm.expectRevert("HTLC: invalid signature");
+        vm.expectRevert(ECDSA.ECDSAInvalidSignature.selector);
         htlc.redeemBySig(
             preimage,
             amount,
@@ -136,7 +137,7 @@ contract HTLCErc20ZeroAddressTest is Test {
         );
 
         vm.prank(eve);
-        vm.expectRevert("HTLC: invalid signature");
+        vm.expectRevert(ECDSA.ECDSAInvalidSignature.selector);
         htlc.refundBySig(
             preimageHash,
             amount,
@@ -153,6 +154,30 @@ contract HTLCErc20ZeroAddressTest is Test {
 
         assertEq(token.balanceOf(eve), 0, "eve must not receive anything");
         assertEq(token.balanceOf(address(htlc)), amount, "htlc must still hold the tokens");
+    }
+
+    /// Every signature has a second form — same `r`, `n - s`, and the other recovery id —
+    /// that recovers the same signer. Nothing here keys off the signature bytes (a
+    /// settlement consumes the swap key, cleared before the transfer), so this is a closed
+    /// door rather than a fixed leak. Asserted so it stays closed.
+    function test_refundBySig_malleatedSignature_reverts() public {
+        _aliceCreate(bob);
+
+        (uint8 v, bytes32 r, bytes32 s) = _signRefund(bobPk, alice, eve, eve, address(token), 0);
+
+        uint256 n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        bytes32 flippedS = bytes32(n - uint256(s));
+        // The recovery id is 27 or 28; the counterpart is the other one. `v ^ 1` would
+        // give 26, which is not a recovery id at all and would fail for the wrong reason.
+        uint8 flippedV = v == 27 ? 28 : 27;
+
+        vm.prank(eve);
+        vm.expectRevert(abi.encodeWithSelector(ECDSA.ECDSAInvalidSignatureS.selector, flippedS));
+        htlc.refundBySig(
+            preimageHash, amount, address(token), alice, timelock, eve, address(token), 0, flippedV, r, flippedS
+        );
+
+        assertEq(token.balanceOf(eve), 0, "the malleated form must settle nothing");
     }
 
     // -- Valid signatures still settle --

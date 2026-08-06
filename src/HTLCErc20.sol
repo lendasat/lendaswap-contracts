@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -212,12 +213,8 @@ contract HTLCErc20 is Ownable2Step {
                 )
             );
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-            claimAddress = ecrecover(digest, v, r, s);
+            claimAddress = ECDSA.recover(digest, v, r, s);
         }
-
-        // `ecrecover` yields address(0) for a malformed signature rather than reverting,
-        // so a recovered address authorises nothing until it is known to be non-zero.
-        require(claimAddress != address(0), "HTLC: invalid signature");
 
         bytes32 key = _key(preimageHash, amount, token, sender, claimAddress, timelock);
         require(swaps[key], "HTLC: swap not found");
@@ -317,12 +314,8 @@ contract HTLCErc20 is Ownable2Step {
                 )
             );
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-            claimAddress = ecrecover(digest, v, r, s);
+            claimAddress = ECDSA.recover(digest, v, r, s);
         }
-
-        // `ecrecover` yields address(0) for a malformed signature rather than reverting,
-        // so a recovered address authorises nothing until it is known to be non-zero.
-        require(claimAddress != address(0), "HTLC: invalid signature");
 
         bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
         require(swaps[key], "HTLC: swap not found");
@@ -438,8 +431,8 @@ contract HTLCErc20 is Ownable2Step {
     ) internal {
         require(amount > 0, "HTLC: zero amount");
         require(timelock > block.timestamp, "HTLC: timelock too soon");
-        // Neither party may be address(0). That is the value `ecrecover` yields for a
-        // malformed signature, so it must never be a claimAddress a key commits to; a
+        // Neither party may be address(0). It is the address a failed signature recovery
+        // resolves to, so it must never be a claimAddress that a key commits to, and a
         // zero refundAddress could never reclaim the swap once its timelock expires.
         require(claimAddress != address(0), "HTLC: zero claim address");
         require(refundAddress != address(0), "HTLC: zero refund address");
