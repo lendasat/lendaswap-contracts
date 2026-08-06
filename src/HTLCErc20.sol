@@ -215,6 +215,10 @@ contract HTLCErc20 is Ownable2Step {
             claimAddress = ecrecover(digest, v, r, s);
         }
 
+        // `ecrecover` yields address(0) for a malformed signature rather than reverting,
+        // so a recovered address authorises nothing until it is known to be non-zero.
+        require(claimAddress != address(0), "HTLC: invalid signature");
+
         bytes32 key = _key(preimageHash, amount, token, sender, claimAddress, timelock);
         require(swaps[key], "HTLC: swap not found");
 
@@ -315,6 +319,10 @@ contract HTLCErc20 is Ownable2Step {
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
             claimAddress = ecrecover(digest, v, r, s);
         }
+
+        // `ecrecover` yields address(0) for a malformed signature rather than reverting,
+        // so a recovered address authorises nothing until it is known to be non-zero.
+        require(claimAddress != address(0), "HTLC: invalid signature");
 
         bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
         require(swaps[key], "HTLC: swap not found");
@@ -430,6 +438,11 @@ contract HTLCErc20 is Ownable2Step {
     ) internal {
         require(amount > 0, "HTLC: zero amount");
         require(timelock > block.timestamp, "HTLC: timelock too soon");
+        // Neither party may be address(0). That is the value `ecrecover` yields for a
+        // malformed signature, so it must never be a claimAddress a key commits to; a
+        // zero refundAddress could never reclaim the swap once its timelock expires.
+        require(claimAddress != address(0), "HTLC: zero claim address");
+        require(refundAddress != address(0), "HTLC: zero refund address");
 
         bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
         require(!swaps[key], "HTLC: swap exists");
