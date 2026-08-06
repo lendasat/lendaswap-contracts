@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -11,7 +13,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 ///      All swap parameters must be supplied on redeem/refund and are verified via hash.
 ///      The `claimAddress` is part of the swap key and only that address can redeem
 ///      (directly via msg.sender or via EIP-712 signature), preventing front-running.
-contract HTLCErc20 {
+/// @dev The owner's only powers are `sweepToken` and `sweepEther`. `lockedAmounts`
+///      accounts for every token unit owed to an active swap, and `sweepToken` can move
+///      only the balance above it, so no owner action can reach swap funds.
+contract HTLCErc20 is Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint8 public constant VERSION = 4;
@@ -48,6 +53,10 @@ contract HTLCErc20 {
     /// @dev Tracks locked swaps. Key is keccak256 of all swap parameters.
     mapping(bytes32 => bool) public swaps;
 
+    /// @dev Token units owed to active swaps, per token. Rises on create, falls on every
+    ///      settlement, so the contract's balance minus this is owed to nobody.
+    mapping(address => uint256) public lockedAmounts;
+
     // -- Events --
 
     /// @dev `key` commits to every swap parameter and is a swap's unique identifier.
@@ -66,6 +75,14 @@ contract HTLCErc20 {
     event SwapRedeemed(bytes32 indexed preimageHash, bytes32 indexed key, bytes32 preimage);
 
     event SwapRefunded(bytes32 indexed preimageHash, bytes32 indexed key);
+
+    event ExcessTokenRecovered(address indexed token, address indexed to, uint256 amount);
+
+    event EtherRecovered(address indexed to, uint256 amount);
+
+    // -- Constructor --
+
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     // -- Reentrancy guard via transient storage (EIP-1153) --
 
@@ -144,6 +161,7 @@ contract HTLCErc20 {
         require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
+        lockedAmounts[token] -= amount;
 
         emit SwapRedeemed(preimageHash, key, preimage);
 
@@ -201,6 +219,7 @@ contract HTLCErc20 {
         require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
+        lockedAmounts[token] -= amount;
 
         emit SwapRedeemed(preimageHash, key, preimage);
 
@@ -301,11 +320,58 @@ contract HTLCErc20 {
         require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
+        lockedAmounts[token] -= amount;
 
         emit SwapRefunded(preimageHash, key);
 
         // Tokens go to msg.sender (the authorized caller), not refundAddress
         IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    // -- Owner functions --
+
+    /// @notice Recover the token balance held beyond what active swaps are owed
+    /// @dev An ERC20 transfer into this contract cannot be refused, so the balance can
+    ///      exceed `lockedAmounts[token]`. Only that difference is movable: the subtraction
+    ///      floors at what every active swap is owed, so no call here can reduce the balance
+    ///      below the amount its settlements will need.
+    /// @param token Token to recover the excess of
+    /// @param to Recipient of the recovered tokens
+    function recoverExcessToken(address token, address to) external onlyOwner nonReentrant {
+        require(to != address(0), "HTLC: zero recipient");
+
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 locked = lockedAmounts[token];
+        require(balance > locked, "HTLC: no excess");
+
+        uint256 excess = balance - locked;
+
+        emit ExcessTokenRecovered(token, to, excess);
+
+        IERC20(token).safeTransfer(to, excess);
+    }
+
+    /// @notice Recover ether held by this contract
+    /// @dev No function here is payable, so a balance can only come from a force-send
+    ///      (selfdestruct, coinbase, or a transfer to the address before deployment). None of
+    ///      it belongs to a swap, so the full balance is recoverable.
+    /// @param to Recipient of the recovered ether
+    function recoverEther(address payable to) external onlyOwner nonReentrant {
+        require(to != address(0), "HTLC: zero recipient");
+
+        uint256 balance = address(this).balance;
+        require(balance > 0, "HTLC: no excess");
+
+        emit EtherRecovered(to, balance);
+
+        (bool sent,) = to.call{value: balance}("");
+        require(sent, "HTLC: ether transfer failed");
+    }
+
+    /// @dev Disabled: recovery is owner-gated, so an ownerless contract could never release
+    ///      a mis-sent balance again. Use `transferOwnership` / `acceptOwnership` instead.
+    function renounceOwnership() public pure override {
+        revert("HTLC: ownership required");
     }
 
     // -- View functions --
@@ -349,6 +415,7 @@ contract HTLCErc20 {
         require(swaps[key], "HTLC: swap not found");
 
         delete swaps[key];
+        lockedAmounts[token] -= amount;
 
         emit SwapRefunded(preimageHash, key);
     }
@@ -368,6 +435,7 @@ contract HTLCErc20 {
         require(!swaps[key], "HTLC: swap exists");
 
         swaps[key] = true;
+        lockedAmounts[token] += amount;
 
         emit SwapCreated(preimageHash, refundAddress, claimAddress, token, amount, timelock, key);
 

@@ -83,7 +83,7 @@ contract HTLCCoordinatorPermit2Test is Test {
     uint256 timelock;
 
     function setUp() public {
-        htlc = new HTLCErc20();
+        htlc = new HTLCErc20(address(this));
         permit2 = ISignatureTransfer(new DeployPermit2().deployPermit2());
         coordinator = new HTLCCoordinator(address(htlc), address(permit2));
         usdc = new MockUSDC();

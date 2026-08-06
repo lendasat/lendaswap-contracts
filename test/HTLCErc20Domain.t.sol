@@ -11,7 +11,7 @@ contract HTLCErc20DomainTest is Test {
     HTLCErc20 htlc;
 
     function setUp() public {
-        htlc = new HTLCErc20();
+        htlc = new HTLCErc20(address(this));
     }
 
     function test_domainVersionTracksContractVersion() public view {

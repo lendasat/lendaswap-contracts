@@ -60,11 +60,17 @@ compute_create2_address() {
   echo "0x${hash:26}"
 }
 
-# HTLCErc20 has no constructor args — init code is just the creation bytecode
-HTLC_INITCODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCErc20.sol/HTLCErc20.json")
+# HTLCErc20 constructor arg is the owner — ABI-encoded and appended to creation bytecode.
+# It is part of the init code, so the same owner is required on every chain for the
+# addresses to match. Keep this in sync with HTLC_OWNER in DeployHTLCCoordinator.s.sol.
+HTLC_OWNER="${HTLC_OWNER:-$DEPLOYER}"
+HTLC_BYTECODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCErc20.sol/HTLCErc20.json")
+HTLC_ENCODED_ARG=$(cast abi-encode "constructor(address)" "$HTLC_OWNER")
+HTLC_INITCODE="${HTLC_BYTECODE}${HTLC_ENCODED_ARG#0x}"
 HTLC_INITCODE_HASH=$(cast keccak "$HTLC_INITCODE")
 HTLC_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$HTLC_INITCODE_HASH")
 
+echo "HTLCErc20 owner:                   $HTLC_OWNER"
 echo "Predicted HTLCErc20 address:       $HTLC_ADDRESS"
 
 # HTLCCoordinator constructor arg is the HTLC address — ABI-encoded and appended to creation bytecode

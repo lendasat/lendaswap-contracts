@@ -27,6 +27,7 @@ use alloy::primitives::address;
 use alloy::primitives::keccak256;
 use alloy::providers::Provider;
 use alloy::providers::ProviderBuilder;
+use alloy::providers::WalletProvider;
 use alloy::signers::Signer;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
@@ -299,7 +300,11 @@ async fn test_lock_and_execute() -> Result<()> {
 
     // -- 2. Deploy contracts (with Permit2) --
     println!("\n2. Deploying contracts ...");
-    let htlc = HTLCErc20::deploy(&deployer_provider).await?;
+    let htlc = HTLCErc20::deploy(
+        &deployer_provider,
+        deployer_provider.default_signer_address(),
+    )
+    .await?;
     raw_provider
         .raw_request::<_, ()>(
             "anvil_setCode".into(),
@@ -508,7 +513,11 @@ async fn test_claim() -> Result<()> {
 
     // -- 2. Deploy contracts (with Permit2) --
     println!("\n2. Deploying contracts ...");
-    let htlc = HTLCErc20::deploy(&deployer_provider).await?;
+    let htlc = HTLCErc20::deploy(
+        &deployer_provider,
+        deployer_provider.default_signer_address(),
+    )
+    .await?;
     raw_provider
         .raw_request::<_, ()>(
             "anvil_setCode".into(),
@@ -717,7 +726,11 @@ async fn test_refund_and_execute() -> Result<()> {
 
     // -- 2. Deploy contracts (with Permit2) --
     println!("\n2. Deploying contracts ...");
-    let htlc = HTLCErc20::deploy(&deployer_provider).await?;
+    let htlc = HTLCErc20::deploy(
+        &deployer_provider,
+        deployer_provider.default_signer_address(),
+    )
+    .await?;
     raw_provider
         .raw_request::<_, ()>(
             "anvil_setCode".into(),
@@ -943,7 +956,11 @@ async fn test_refund_to() -> Result<()> {
     let raw_provider = ProviderBuilder::new().connect_http(endpoint.clone());
 
     // Deploy (with Permit2)
-    let htlc = HTLCErc20::deploy(&deployer_provider).await?;
+    let htlc = HTLCErc20::deploy(
+        &deployer_provider,
+        deployer_provider.default_signer_address(),
+    )
+    .await?;
     raw_provider
         .raw_request::<_, ()>(
             "anvil_setCode".into(),

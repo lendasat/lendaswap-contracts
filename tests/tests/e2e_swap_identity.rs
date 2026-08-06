@@ -1,15 +1,13 @@
 //! E2E test: a settlement event identifies exactly one swap.
 //!
-//! `preimageHash` does not identify a swap. Any party may lock their own HTLC under
-//! a `preimageHash` that is already in use, with entirely independent terms — the
-//! storage key covers every parameter, so the two coexist as separate swaps. An
-//! indexer that attributes a `SwapRedeemed` / `SwapRefunded` to a swap on the basis
-//! of `preimageHash` alone therefore cannot tell which of them settled.
+//! A swap is identified by `key`, the commitment to its full parameter set. It is not
+//! identified by `preimageHash`: the storage key covers every parameter, so any number
+//! of swaps may share one hash and coexist with independent terms and lifecycles.
+//! Every lifecycle event therefore carries `key`, and that is what a consumer matches
+//! a settlement on.
 //!
-//! `key` is the identifier that does discriminate: it is the commitment to the full
-//! parameter set, so each swap's settlement event names that swap and no other.
-//! These tests exercise the discrimination the way a log consumer sees it — filter
-//! by `preimageHash` topic, then match on `key`.
+//! These tests exercise it the way a log consumer sees it: lock two swaps under one
+//! `preimageHash`, filter the logs by that topic, and match settlements on `key`.
 //!
 //! Run:
 //!   cargo test --test e2e_swap_identity -- --nocapture
@@ -21,6 +19,7 @@ use alloy::primitives::FixedBytes;
 use alloy::primitives::U256;
 use alloy::providers::Provider;
 use alloy::providers::ProviderBuilder;
+use alloy::providers::WalletProvider;
 use alloy::rpc::types::Filter;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
@@ -132,7 +131,11 @@ async fn setup() -> Result<Fixture> {
         .wallet(EthereumWallet::from(deployer))
         .connect_http(endpoint.clone());
 
-    let htlc = HTLCErc20::deploy(&deployer_provider).await?;
+    let htlc = HTLCErc20::deploy(
+        &deployer_provider,
+        deployer_provider.default_signer_address(),
+    )
+    .await?;
     let wbtc = MockWBTC::deploy(&deployer_provider).await?;
 
     let token = IERC20::new(*wbtc.address(), &deployer_provider);

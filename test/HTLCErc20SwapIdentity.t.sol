@@ -43,7 +43,7 @@ contract HTLCErc20SwapIdentityTest is Test {
     uint256 timelock;
 
     function setUp() public {
-        htlc = new HTLCErc20();
+        htlc = new HTLCErc20(address(this));
         wbtc = new MockWBTC();
         preimageHash = sha256(abi.encodePacked(preimage));
         timelock = block.timestamp + 1 hours;

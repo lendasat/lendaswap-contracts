@@ -21,10 +21,16 @@ contract DeployHTLCCoordinator is Script {
         // Same salt + same bytecode + same deployer = same address everywhere.
         bytes32 salt = vm.envOr("DEPLOY_SALT", bytes32(0));
 
+        // Owner of the deployed HTLCErc20 — may only recover balances no swap is owed.
+        // It is part of the init code, so the same value is needed on every chain for
+        // the CREATE2 addresses to match. Defaults to the deployer.
+        address htlcOwner = vm.envOr("HTLC_OWNER", vm.addr(deployerPrivateKey));
+
         vm.startBroadcast(deployerPrivateKey);
 
-        HTLCErc20 htlc = new HTLCErc20{salt: salt}();
+        HTLCErc20 htlc = new HTLCErc20{salt: salt}(htlcOwner);
         console.log("HTLCErc20 deployed at:", address(htlc));
+        console.log("HTLCErc20 owner:", htlcOwner);
 
         // Canonical Permit2 address (deployed via CREATE2 on all chains)
         address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;

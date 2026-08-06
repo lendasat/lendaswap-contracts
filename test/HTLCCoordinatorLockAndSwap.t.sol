@@ -78,7 +78,7 @@ contract HTLCCoordinatorLockAndSwapTest is Test {
     uint256 timelock;
 
     function setUp() public {
-        htlc = new HTLCErc20();
+        htlc = new HTLCErc20(address(this));
         coordinator = new HTLCCoordinator(address(htlc), address(0));
         usdc = new MockUSDC();
         wbtc = new MockWBTC();

@@ -26,6 +26,7 @@ use alloy::primitives::address;
 use alloy::primitives::keccak256;
 use alloy::providers::Provider;
 use alloy::providers::ProviderBuilder;
+use alloy::providers::WalletProvider;
 use alloy::signers::Signer;
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
@@ -162,7 +163,7 @@ async fn test_e2e_lock_then_redeem_and_swap() -> Result<()> {
     // -----------------------------------------------------------------------
     println!("\n1. Deploying contracts ...");
 
-    let htlc = HTLCErc20::deploy(&hub_provider).await?;
+    let htlc = HTLCErc20::deploy(&hub_provider, hub_provider.default_signer_address()).await?;
     let htlc_address = *htlc.address();
     println!("   HTLCErc20 at {htlc_address} (deployed by hub)");
 
