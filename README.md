@@ -124,8 +124,8 @@ See [`tests/tests/e2e_permit2_swap_lock_then_claim.rs`](tests/tests/e2e_permit2_
 
 ### Polygon (Chain ID: 137)
 
-- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://polygonscan.com/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
-- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://polygonscan.com/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+- HTLCErc20: [`0x5cedE56704374c6Aa37592af9d8818f7abb5147F`](https://polygonscan.com/address/0x5cedE56704374c6Aa37592af9d8818f7abb5147F)
+- HTLCCoordinator: [`0xe2E043B72161Ed562b6235D7654E2449871fC58F`](https://polygonscan.com/address/0xe2E043B72161Ed562b6235D7654E2449871fC58F)
 
 Tokens:
 
@@ -133,8 +133,8 @@ Tokens:
 
 ### Ethereum (Chain ID: 1)
 
-- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://etherscan.io/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
-- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://etherscan.io/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+- HTLCErc20: [`0x5cedE56704374c6Aa37592af9d8818f7abb5147F`](https://etherscan.io/address/0x5cedE56704374c6Aa37592af9d8818f7abb5147F)
+- HTLCCoordinator: [`0xe2E043B72161Ed562b6235D7654E2449871fC58F`](https://etherscan.io/address/0xe2E043B72161Ed562b6235D7654E2449871fC58F)
 
 Tokens:
 
@@ -142,8 +142,8 @@ Tokens:
 
 ### Arbitrum (Chain ID: 42161)
 
-- HTLCErc20: [`0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022`](https://arbiscan.io/address/0x5317dccd55dde04d5f7ba2e34fe8b1b214f1e022)
-- HTLCCoordinator: [`0x57ef7025f9f6f135e8338e18eb3027acb9d4785c`](https://arbiscan.io/address/0x57ef7025f9f6f135e8338e18eb3027acb9d4785c)
+- HTLCErc20: [`0x5cedE56704374c6Aa37592af9d8818f7abb5147F`](https://arbiscan.io/address/0x5cedE56704374c6Aa37592af9d8818f7abb5147F)
+- HTLCCoordinator: [`0xe2E043B72161Ed562b6235D7654E2449871fC58F`](https://arbiscan.io/address/0xe2E043B72161Ed562b6235D7654E2449871fC58F)
 
 Tokens:
 
