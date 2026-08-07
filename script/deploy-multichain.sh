@@ -50,6 +50,10 @@ echo ""
 # ─── Predict CREATE2 addresses ─────────────────────────────────────────────
 echo "CREATE2 salt: $DEPLOY_SALT"
 
+# Forge's salted `new` deploys through the canonical CREATE2 factory, so the
+# factory (not the broadcasting EOA) is the deployer in the address formula.
+CREATE2_FACTORY="0x4e59b44847B379578588920cA78FbF26c0B4956C"
+
 # CREATE2 address = keccak256(0xff ++ deployer ++ salt ++ keccak256(initCode))[12:]
 compute_create2_address() {
   local deployer="$1" salt="$2" initcode_hash="$3"
@@ -68,17 +72,20 @@ HTLC_BYTECODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCErc20.sol/HTLCE
 HTLC_ENCODED_ARG=$(cast abi-encode "constructor(address)" "$HTLC_OWNER")
 HTLC_INITCODE="${HTLC_BYTECODE}${HTLC_ENCODED_ARG#0x}"
 HTLC_INITCODE_HASH=$(cast keccak "$HTLC_INITCODE")
-HTLC_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$HTLC_INITCODE_HASH")
+HTLC_ADDRESS=$(compute_create2_address "$CREATE2_FACTORY" "$DEPLOY_SALT" "$HTLC_INITCODE_HASH")
 
 echo "HTLCErc20 owner:                   $HTLC_OWNER"
 echo "Predicted HTLCErc20 address:       $HTLC_ADDRESS"
 
-# HTLCCoordinator constructor arg is the HTLC address — ABI-encoded and appended to creation bytecode
+# HTLCCoordinator constructor args are the HTLC address and canonical Permit2 —
+# ABI-encoded and appended to creation bytecode. Keep in sync with
+# DeployHTLCCoordinator.s.sol.
+PERMIT2_ADDRESS="0x000000000022D473030F116dDEE9F6B43aC78BA3"
 COORDINATOR_BYTECODE=$(jq -r '.bytecode.object' "$CONTRACTS_DIR/out/HTLCCoordinator.sol/HTLCCoordinator.json")
-ENCODED_ARG=$(cast abi-encode "constructor(address)" "$HTLC_ADDRESS")
+ENCODED_ARG=$(cast abi-encode "constructor(address,address)" "$HTLC_ADDRESS" "$PERMIT2_ADDRESS")
 COORDINATOR_INITCODE="${COORDINATOR_BYTECODE}${ENCODED_ARG#0x}"
 COORDINATOR_INITCODE_HASH=$(cast keccak "$COORDINATOR_INITCODE")
-COORDINATOR_ADDRESS=$(compute_create2_address "$DEPLOYER" "$DEPLOY_SALT" "$COORDINATOR_INITCODE_HASH")
+COORDINATOR_ADDRESS=$(compute_create2_address "$CREATE2_FACTORY" "$DEPLOY_SALT" "$COORDINATOR_INITCODE_HASH")
 
 echo "Predicted HTLCCoordinator address: $COORDINATOR_ADDRESS"
 echo ""
