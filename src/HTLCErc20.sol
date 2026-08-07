@@ -14,9 +14,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 ///      All swap parameters must be supplied on redeem/refund and are verified via hash.
 ///      The `claimAddress` is part of the swap key and only that address can redeem
 ///      (directly via msg.sender or via EIP-712 signature), preventing front-running.
-/// @dev The owner's only powers are `sweepToken` and `sweepEther`. `lockedAmounts`
-///      accounts for every token unit owed to an active swap, and `sweepToken` can move
-///      only the balance above it, so no owner action can reach swap funds.
+/// @dev The owner's only powers are `recoverExcessToken` and `recoverEther`.
+///      `lockedAmounts` accounts for every token unit owed to an active swap, and
+///      `recoverExcessToken` can move only the balance above it, so no owner action
+///      can reach swap funds.
 contract HTLCErc20 is Ownable2Step {
     using SafeERC20 for IERC20;
 
@@ -105,7 +106,8 @@ contract HTLCErc20 is Ownable2Step {
 
     /// @notice Lock ERC20 tokens into a new hash time-locked swap
     /// @dev Convenience wrapper — uses msg.sender as the sender (refund address)
-    /// @param preimageHash SHA-256 hash of the secret preimage — used as the swap identifier in events
+    /// @param preimageHash SHA-256 hash of the secret preimage — an indexed event topic,
+    ///                      not an identifier: swaps may share one, and `key` tells them apart
     /// @param amount Token amount to lock (caller must have approved this contract)
     /// @param token ERC20 token address to lock
     /// @param claimAddress Address authorized to redeem the locked tokens
