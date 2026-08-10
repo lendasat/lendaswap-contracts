@@ -10,7 +10,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// @title HTLCErc20
 /// @notice Hash Time-Locked Contract for trustless ERC20 atomic swaps
 /// @dev Uses SHA-256 for preimage hashing to stay compatible with Bitcoin HTLC scripts.
-///      Swap existence is tracked with a single bool per swap for minimal storage cost.
+///      Each swap's lifecycle state is kept in storage permanently (None → Active →
+///      Redeemed/Refunded), and a redeem also stores the revealed preimage — so an
+///      observer can classify a settled swap and recover its preimage with a single
+///      state read instead of scanning event logs.
 ///      All swap parameters must be supplied on redeem/refund and are verified via hash.
 ///      The `claimAddress` is part of the swap key and only that address can redeem
 ///      (directly via msg.sender or via EIP-712 signature), preventing front-running.
@@ -21,7 +24,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract HTLCErc20 is Ownable2Step {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 4;
+    uint8 public constant VERSION = 5;
 
     // -- EIP-712 --
     //
@@ -40,7 +43,7 @@ contract HTLCErc20 is Ownable2Step {
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256("HTLCErc20"),
-            keccak256("4"),
+            keccak256("5"),
             block.chainid,
             address(this)
         )
@@ -52,12 +55,28 @@ contract HTLCErc20 is Ownable2Step {
 
     // -- State --
 
-    /// @dev Tracks locked swaps. Key is keccak256 of all swap parameters.
-    mapping(bytes32 => bool) public swaps;
+    /// @notice Lifecycle of a swap. Terminal states are never deleted, so a key's
+    ///         history stays readable from storage forever.
+    enum SwapState {
+        None,
+        Active,
+        Redeemed,
+        Refunded
+    }
+
+    /// @dev Swap lifecycle state. Key is keccak256 of all swap parameters. A key
+    ///      that ever reached a terminal state can never be created again: the
+    ///      preimage of a redeemed key is public, so a second swap under the same
+    ///      key would be claimable by anyone watching the chain.
+    mapping(bytes32 => SwapState) public swaps;
 
     /// @dev Token units owed to active swaps, per token. Rises on create, falls on every
     ///      settlement, so the contract's balance minus this is owed to nobody.
     mapping(address => uint256) public lockedAmounts;
+
+    /// @dev The preimage a redeem revealed, by swap key. Zero until redeemed; the
+    ///      state enum, not this value, is the authority on whether a redeem happened.
+    mapping(bytes32 => bytes32) public preimages;
 
     // -- Events --
 
@@ -161,9 +180,10 @@ contract HTLCErc20 is Ownable2Step {
 
         // msg.sender is used as claimAddress — only the designated address can claim
         bytes32 key = _key(preimageHash, amount, token, sender, msg.sender, timelock);
-        require(swaps[key], "HTLC: swap not found");
+        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
 
-        delete swaps[key];
+        swaps[key] = SwapState.Redeemed;
+        preimages[key] = preimage;
         lockedAmounts[token] -= amount;
 
         emit SwapRedeemed(preimageHash, key, preimage);
@@ -219,9 +239,10 @@ contract HTLCErc20 is Ownable2Step {
         }
 
         bytes32 key = _key(preimageHash, amount, token, sender, claimAddress, timelock);
-        require(swaps[key], "HTLC: swap not found");
+        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
 
-        delete swaps[key];
+        swaps[key] = SwapState.Redeemed;
+        preimages[key] = preimage;
         lockedAmounts[token] -= amount;
 
         emit SwapRedeemed(preimageHash, key, preimage);
@@ -359,7 +380,14 @@ contract HTLCErc20 is Ownable2Step {
         address claimAddress,
         uint256 timelock
     ) external view returns (bool) {
-        return swaps[_key(preimageHash, amount, token, sender, claimAddress, timelock)];
+        return swaps[_key(preimageHash, amount, token, sender, claimAddress, timelock)] == SwapState.Active;
+    }
+
+    /// @notice A swap's lifecycle state and (if redeemed) its revealed preimage,
+    ///         by swap key — one read classifies a settled swap without log scans
+    /// @param key The swap key (see `computeKey`, or the `key` field of `SwapCreated`)
+    function swapState(bytes32 key) external view returns (SwapState state, bytes32 preimage) {
+        return (swaps[key], preimages[key]);
     }
 
     /// @notice Compute the storage key for a swap from its parameters
@@ -386,9 +414,9 @@ contract HTLCErc20 is Ownable2Step {
         require(block.timestamp >= timelock, "HTLC: timelock not expired");
 
         bytes32 key = _key(preimageHash, amount, token, msg.sender, claimAddress, timelock);
-        require(swaps[key], "HTLC: swap not found");
+        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
 
-        delete swaps[key];
+        swaps[key] = SwapState.Refunded;
         lockedAmounts[token] -= amount;
 
         emit SwapRefunded(preimageHash, key);
@@ -411,9 +439,12 @@ contract HTLCErc20 is Ownable2Step {
         require(refundAddress != address(0), "HTLC: zero refund address");
 
         bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
-        require(!swaps[key], "HTLC: swap exists");
+        // Also rejects settled keys: the key's terms are spent — a redeemed key's
+        // preimage is public, so tokens locked under it again would be claimable
+        // by anyone. New swaps must use a fresh preimageHash (or other terms).
+        require(swaps[key] == SwapState.None, "HTLC: swap exists");
 
-        swaps[key] = true;
+        swaps[key] = SwapState.Active;
         lockedAmounts[token] += amount;
 
         emit SwapCreated(preimageHash, refundAddress, claimAddress, token, amount, timelock, key);
