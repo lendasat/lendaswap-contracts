@@ -122,14 +122,14 @@ See [`tests/tests/e2e_permit2_swap_lock_then_claim.rs`](tests/tests/e2e_permit2_
 
 ## Contract Addresses
 
-Current deployment: **HTLCErc20 v5** (terminal swap state in storage; EIP-712
-domain version `"5"`). Deployed via CREATE2, so the addresses are identical on
-every chain.
+Current deployment: **HTLCErc20 v5** (terminal swap state in storage, typed
+`SwapNotActive`/`SwapExists` settlement errors; EIP-712 domain version `"5"`).
+Deployed via CREATE2, so the addresses are identical on every chain.
 
 ### Polygon (Chain ID: 137)
 
-- HTLCErc20 (v5): [`0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49`](https://polygonscan.com/address/0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49)
-- HTLCCoordinator: [`0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d`](https://polygonscan.com/address/0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d)
+- HTLCErc20 (v5): [`0x16f898C8E56daE38f782302e35f3eF3E51524fF6`](https://polygonscan.com/address/0x16f898C8E56daE38f782302e35f3eF3E51524fF6)
+- HTLCCoordinator: [`0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05`](https://polygonscan.com/address/0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05)
 
 Tokens:
 
@@ -137,8 +137,8 @@ Tokens:
 
 ### Ethereum (Chain ID: 1)
 
-- HTLCErc20 (v5): [`0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49`](https://etherscan.io/address/0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49)
-- HTLCCoordinator: [`0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d`](https://etherscan.io/address/0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d)
+- HTLCErc20 (v5): [`0x16f898C8E56daE38f782302e35f3eF3E51524fF6`](https://etherscan.io/address/0x16f898C8E56daE38f782302e35f3eF3E51524fF6)
+- HTLCCoordinator: [`0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05`](https://etherscan.io/address/0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05)
 
 Tokens:
 
@@ -146,19 +146,20 @@ Tokens:
 
 ### Arbitrum (Chain ID: 42161)
 
-- HTLCErc20 (v5): [`0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49`](https://arbiscan.io/address/0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49)
-- HTLCCoordinator: [`0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d`](https://arbiscan.io/address/0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d)
+- HTLCErc20 (v5): [`0x16f898C8E56daE38f782302e35f3eF3E51524fF6`](https://arbiscan.io/address/0x16f898C8E56daE38f782302e35f3eF3E51524fF6)
+- HTLCCoordinator: [`0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05`](https://arbiscan.io/address/0xD26eF0b3AC359B02b0ED6276e82CF9Ad4718aE05)
 
 Tokens:
 
 - tBTC: `0x6c84a8f1c29108F47a79964b5Fe888D4f4D0dE40`
 
-### Legacy deployments (v4, EIP-712 domain version `"4"`)
+### Legacy deployments
 
 Still live — in-flight swaps created on them settle against their stored
 address and version. Do not remove until no unresolved swaps reference them.
 
-- All chains: HTLCErc20 `0x5cedE56704374c6Aa37592af9d8818f7abb5147F`, HTLCCoordinator `0xe2E043B72161Ed562b6235D7654E2449871fC58F`
+- All chains (v5): HTLCErc20 `0x1feB479a912bd706bE6d22979Ba5C9ca0e9FDB49`, HTLCCoordinator `0x3cf9385c8D3dC7D9f199f4C9814eC0aCff6c8E7d`
+- All chains (v4, EIP-712 domain version `"4"`): HTLCErc20 `0x5cedE56704374c6Aa37592af9d8818f7abb5147F`, HTLCCoordinator `0xe2E043B72161Ed562b6235D7654E2449871fC58F`
 - Polygon + Ethereum (older): HTLCErc20 `0xc23a186aedf24537ec82318da9891c02d544bffa`, HTLCCoordinator `0x628729f060d01001efcfb6077dfe072821346485`
 - Arbitrum (older): HTLCErc20 `0x13572c930A5Bbb3d0d46d567D71a9Ad962f85D18`, HTLCCoordinator `0x5B7cDa892cF870156bcb9a710249830Fa1Fc67Be`
 
