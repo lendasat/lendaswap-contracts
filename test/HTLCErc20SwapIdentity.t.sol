@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {HTLCErc20} from "../src/HTLCErc20.sol";
+import {HTLCErc20, SwapKey} from "../src/HTLCErc20.sol";
 
 contract MockWBTC is ERC20 {
     constructor() ERC20("Wrapped Bitcoin", "WBTC") {
@@ -26,10 +26,10 @@ contract HTLCErc20SwapIdentityTest is Test {
         address token,
         uint256 amount,
         uint256 timelock,
-        bytes32 key
+        SwapKey key
     );
-    event SwapRedeemed(bytes32 indexed preimageHash, bytes32 indexed key, bytes32 preimage);
-    event SwapRefunded(bytes32 indexed preimageHash, bytes32 indexed key);
+    event SwapRedeemed(bytes32 indexed preimageHash, SwapKey indexed key, bytes32 preimage);
+    event SwapRefunded(bytes32 indexed preimageHash, SwapKey indexed key);
 
     HTLCErc20 htlc;
     MockWBTC wbtc;
@@ -61,7 +61,7 @@ contract HTLCErc20SwapIdentityTest is Test {
 
     function test_createEmitsSwapKey() public {
         uint256 amount = 1e8;
-        bytes32 key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
+        SwapKey key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
 
         vm.prank(alice);
         wbtc.approve(address(htlc), amount);
@@ -75,7 +75,7 @@ contract HTLCErc20SwapIdentityTest is Test {
     function test_redeemEmitsSwapKey() public {
         uint256 amount = 1e8;
         _create(alice, amount, bob, timelock);
-        bytes32 key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
+        SwapKey key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
 
         vm.expectEmit(true, true, false, true, address(htlc));
         emit SwapRedeemed(preimageHash, key, preimage);
@@ -86,7 +86,7 @@ contract HTLCErc20SwapIdentityTest is Test {
     function test_refundEmitsSwapKey() public {
         uint256 amount = 1e8;
         _create(alice, amount, bob, timelock);
-        bytes32 key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
+        SwapKey key = htlc.computeKey(preimageHash, amount, address(wbtc), alice, bob, timelock);
 
         vm.warp(timelock);
 
@@ -106,10 +106,10 @@ contract HTLCErc20SwapIdentityTest is Test {
         _create(alice, amountA, bob, timelock);
         _create(carol, amountB, carol, timelockB);
 
-        bytes32 keyA = htlc.computeKey(preimageHash, amountA, address(wbtc), alice, bob, timelock);
-        bytes32 keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelockB);
+        SwapKey keyA = htlc.computeKey(preimageHash, amountA, address(wbtc), alice, bob, timelock);
+        SwapKey keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelockB);
 
-        assertTrue(keyA != keyB, "distinct terms must yield distinct keys");
+        assertTrue(SwapKey.unwrap(keyA) != SwapKey.unwrap(keyB), "distinct terms must yield distinct keys");
         assertTrue(htlc.isActive(preimageHash, amountA, address(wbtc), alice, bob, timelock), "swap A active");
         assertTrue(htlc.isActive(preimageHash, amountB, address(wbtc), carol, carol, timelockB), "swap B active");
         assertEq(wbtc.balanceOf(address(htlc)), amountA + amountB, "both swaps hold funds");
@@ -124,7 +124,7 @@ contract HTLCErc20SwapIdentityTest is Test {
         _create(alice, amountA, bob, timelock);
         _create(carol, amountB, carol, timelockB);
 
-        bytes32 keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelockB);
+        SwapKey keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelockB);
 
         // Carol redeems her own swap. The event names keyB, not keyA.
         vm.expectEmit(true, true, false, true, address(htlc));
@@ -147,7 +147,7 @@ contract HTLCErc20SwapIdentityTest is Test {
         _create(alice, amountA, bob, timelock);
         _create(carol, amountB, carol, timelock);
 
-        bytes32 keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelock);
+        SwapKey keyB = htlc.computeKey(preimageHash, amountB, address(wbtc), carol, carol, timelock);
 
         vm.warp(timelock);
 

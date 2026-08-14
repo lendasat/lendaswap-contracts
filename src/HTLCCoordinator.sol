@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ISignatureTransfer} from "permit2/interfaces/ISignatureTransfer.sol";
-import {HTLCErc20} from "./HTLCErc20.sol";
+import {HTLCErc20, SwapKey} from "./HTLCErc20.sol";
 
 /// @title HTLCCoordinator
 /// @notice Coordinates arbitrary call execution with HTLCErc20 create, redeem and refund
@@ -66,9 +66,9 @@ contract HTLCCoordinator {
 
     // -- Storage --
 
-    /// @dev Maps HTLC storage key -> original depositor address.
+    /// @dev Maps HTLC swap key -> original depositor address.
     ///      Populated by executeAndCreate, used by refundAndExecute / refundTo.
-    mapping(bytes32 => address) public deposits;
+    mapping(SwapKey => address) public deposits;
 
     // -- Reentrancy guard via transient storage (EIP-1153) --
 
@@ -131,7 +131,7 @@ contract HTLCCoordinator {
         IERC20(token).forceApprove(address(HTLC), balance);
         HTLC.create(preimageHash, balance, token, claimAddress, timelock);
 
-        bytes32 key = HTLC.computeKey(preimageHash, balance, token, address(this), claimAddress, timelock);
+        SwapKey key = HTLC.computeKey(preimageHash, balance, token, address(this), claimAddress, timelock);
         deposits[key] = depositor;
     }
 
@@ -203,7 +203,7 @@ contract HTLCCoordinator {
         address sweepToken,
         uint256 minAmountOut
     ) external nonReentrant {
-        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
+        SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
         require(depositor != address(0), "Coordinator: unknown HTLC");
         require(msg.sender == depositor, "Coordinator: unauthorized");
@@ -235,7 +235,7 @@ contract HTLCCoordinator {
         address claimAddress,
         uint256 timelock
     ) external nonReentrant {
-        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
+        SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
         require(depositor != address(0), "Coordinator: unknown HTLC");
 
@@ -281,7 +281,7 @@ contract HTLCCoordinator {
         bytes32 claimS
     ) external nonReentrant {
         // 1. Look up depositor from coordinator's mapping
-        bytes32 key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
+        SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
         require(depositor != address(0), "Coordinator: unknown HTLC");
 

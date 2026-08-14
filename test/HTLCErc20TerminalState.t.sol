@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {HTLCErc20} from "../src/HTLCErc20.sol";
+import {HTLCErc20, SwapKey} from "../src/HTLCErc20.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {
@@ -26,7 +26,7 @@ contract HTLCErc20TerminalStateTest is Test {
     bytes32 preimageHash;
     uint256 amount = 1e18;
     uint256 timelock;
-    bytes32 key;
+    SwapKey key;
 
     function setUp() public {
         (bob, bobPk) = makeAddrAndKey("bob");

@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {HTLCErc20} from "../src/HTLCErc20.sol";
+import {HTLCErc20, SwapKey} from "../src/HTLCErc20.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {
@@ -124,7 +124,7 @@ contract HTLCErc20ZeroAddressTest is Test {
     /// would have produced. Without it the settlement underflows on the decrement and
     /// reverts for that reason instead, which would leave the theft itself untested.
     function test_preExistingZeroClaimSwap_cannotBeStolen() public {
-        bytes32 key = htlc.computeKey(preimageHash, amount, address(token), alice, address(0), timelock);
+        SwapKey key = htlc.computeKey(preimageHash, amount, address(token), alice, address(0), timelock);
         vm.store(address(htlc), keccak256(abi.encode(key, SWAPS_SLOT)), bytes32(uint256(1)));
         vm.store(address(htlc), keccak256(abi.encode(address(token), LOCKED_AMOUNTS_SLOT)), bytes32(amount));
         token.transfer(address(htlc), amount);
