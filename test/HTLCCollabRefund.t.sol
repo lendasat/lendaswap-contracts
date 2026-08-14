@@ -171,7 +171,7 @@ contract HTLCCollabRefundTest is Test {
         );
 
         vm.prank(relay);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.refundBySig(preimageHash, wbtcAmount, address(wbtc), alice, timelock, alice, address(wbtc), 0, v, r, s);
     }
 
@@ -187,7 +187,7 @@ contract HTLCCollabRefundTest is Test {
         );
 
         vm.prank(alice); // wrong caller
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.refundBySig(preimageHash, wbtcAmount, address(wbtc), alice, timelock, alice, address(wbtc), 0, v, r, s);
     }
 
@@ -446,7 +446,7 @@ contract HTLCCollabRefundTest is Test {
         );
 
         vm.prank(relay);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         coordinator.collabRefundAndExecute(
             preimageHash, wbtcAmount, address(wbtc), bob, timelock, calls, address(wbtc), 0, dV, dR, dS, cV, cR, cS
         );

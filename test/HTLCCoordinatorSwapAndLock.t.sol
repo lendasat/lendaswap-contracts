@@ -160,7 +160,7 @@ contract HTLCCoordinatorCreateAndClaimTest is Test {
         // 2. Bob tries to claim with the wrong preimage
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
         vm.prank(bob);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.redeem(wrongPreimage, expectedWbtc, address(wbtc), address(coordinator), timelock);
 
         // Verify: WBTC still locked

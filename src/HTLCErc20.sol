@@ -59,6 +59,15 @@ contract HTLCErc20 is Ownable2Step {
 
     error Reentrancy();
 
+    /// @dev Settlement needs the key Active; the state names which lifecycle
+    ///      stage the swap is actually in (None = never created, or already
+    ///      Redeemed / Refunded).
+    error SwapNotActive(SwapKey key, SwapState state);
+
+    /// @dev Creation needs the key unused; the state names what occupies it
+    ///      (Active, or a terminal state whose terms are spent).
+    error SwapExists(SwapKey key, SwapState state);
+
     // -- State --
 
     /// @notice Lifecycle of a swap. Terminal states are never deleted, so a key's
@@ -187,7 +196,8 @@ contract HTLCErc20 is Ownable2Step {
 
         // msg.sender is used as claimAddress — only the designated address can claim
         SwapKey key = _key(preimageHash, amount, token, sender, msg.sender, timelock);
-        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
+        SwapState state = swaps[key];
+        if (state != SwapState.Active) revert SwapNotActive(key, state);
 
         swaps[key] = SwapState.Redeemed;
         preimages[key] = preimage;
@@ -246,7 +256,8 @@ contract HTLCErc20 is Ownable2Step {
         }
 
         SwapKey key = _key(preimageHash, amount, token, sender, claimAddress, timelock);
-        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
+        SwapState state = swaps[key];
+        if (state != SwapState.Active) revert SwapNotActive(key, state);
 
         swaps[key] = SwapState.Redeemed;
         preimages[key] = preimage;
@@ -421,7 +432,8 @@ contract HTLCErc20 is Ownable2Step {
         require(block.timestamp >= timelock, "HTLC: timelock not expired");
 
         SwapKey key = _key(preimageHash, amount, token, msg.sender, claimAddress, timelock);
-        require(swaps[key] == SwapState.Active, "HTLC: swap not found");
+        SwapState state = swaps[key];
+        if (state != SwapState.Active) revert SwapNotActive(key, state);
 
         swaps[key] = SwapState.Refunded;
         lockedAmounts[token] -= amount;
@@ -449,7 +461,8 @@ contract HTLCErc20 is Ownable2Step {
         // Also rejects settled keys: the key's terms are spent — a redeemed key's
         // preimage is public, so tokens locked under it again would be claimable
         // by anyone. New swaps must use a fresh preimageHash (or other terms).
-        require(swaps[key] == SwapState.None, "HTLC: swap exists");
+        SwapState state = swaps[key];
+        if (state != SwapState.None) revert SwapExists(key, state);
 
         swaps[key] = SwapState.Active;
         lockedAmounts[token] += amount;

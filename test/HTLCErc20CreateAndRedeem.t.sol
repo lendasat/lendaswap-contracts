@@ -76,7 +76,7 @@ contract HTLCErc20CreateAndRedeemTest is Test {
         // 2. Bob tries to redeem with a wrong preimage — should revert
         bytes32 wrongPreimage = bytes32(uint256(0xbaadf00d));
         vm.prank(bob);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.redeem(wrongPreimage, amount, address(wbtc), alice, timelock);
 
         // Verify: nothing changed
@@ -94,7 +94,7 @@ contract HTLCErc20CreateAndRedeemTest is Test {
         // 2. Charlie (not the claimAddress) tries to redeem — should fail
         address charlie = makeAddr("charlie");
         vm.prank(charlie);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.redeem(preimage, amount, address(wbtc), alice, timelock);
 
         // Verify: nothing changed

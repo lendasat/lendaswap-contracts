@@ -120,7 +120,7 @@ contract HTLCFrontRunningProtectionTest is Test {
         // Attacker knows the preimage (e.g. from mempool) but is not the claimAddress
         // msg.sender = attacker, but key was created with claimAddress = bob
         vm.prank(attacker);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.redeem(preimage, wbtcAmount, address(wbtc), alice, timelock);
 
         // WBTC still locked
@@ -173,7 +173,7 @@ contract HTLCFrontRunningProtectionTest is Test {
         // Attacker replays the same signature but calls from their own address
         // ecrecover will recover a different address because msg.sender is different
         vm.prank(attacker);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         htlc.redeemBySig(preimage, wbtcAmount, address(wbtc), alice, timelock, bob, address(0), 0, callsHash, v, r, s);
 
         // WBTC still locked
@@ -249,7 +249,7 @@ contract HTLCFrontRunningProtectionTest is Test {
         // a different address → swap key mismatch → revert.
 
         vm.prank(attacker);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(wbtc), 0,
@@ -282,7 +282,7 @@ contract HTLCFrontRunningProtectionTest is Test {
 
         // The HTLC key includes claimAddress = bob, but ecrecover returns attacker → key mismatch
         vm.prank(attacker);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(wbtc), 0,
@@ -395,7 +395,7 @@ contract HTLCFrontRunningProtectionTest is Test {
         HTLCCoordinator.Call[] memory maliciousCalls = new HTLCCoordinator.Call[](0);
 
         vm.prank(bob);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectPartialRevert(HTLCErc20.SwapNotActive.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             maliciousCalls, address(wbtc), 0,

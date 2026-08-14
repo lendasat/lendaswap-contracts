@@ -88,7 +88,9 @@ contract HTLCErc20TerminalStateTest is Test {
         // would be claimable by anyone, so create must reject the settled key.
         vm.startPrank(alice);
         token.approve(address(htlc), amount);
-        vm.expectRevert("HTLC: swap exists");
+        vm.expectRevert(
+            abi.encodeWithSelector(HTLCErc20.SwapExists.selector, key, HTLCErc20.SwapState.Redeemed)
+        );
         htlc.create(preimageHash, amount, address(token), bob, timelock);
         vm.stopPrank();
     }
@@ -110,7 +112,9 @@ contract HTLCErc20TerminalStateTest is Test {
         // can reject this create.
         vm.startPrank(alice);
         token.approve(address(htlc), amount);
-        vm.expectRevert("HTLC: swap exists");
+        vm.expectRevert(
+            abi.encodeWithSelector(HTLCErc20.SwapExists.selector, key, HTLCErc20.SwapState.Refunded)
+        );
         htlc.create(preimageHash, amount, address(token), bob, timelock);
         vm.stopPrank();
     }
@@ -151,15 +155,20 @@ contract HTLCErc20TerminalStateTest is Test {
         vm.prank(bob);
         htlc.redeem(preimage, amount, address(token), alice, timelock);
 
-        // A second redeem must not pass the Active check.
+        // A second redeem must not pass the Active check; the error names the
+        // terminal state the swap is actually in.
         vm.prank(bob);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectRevert(
+            abi.encodeWithSelector(HTLCErc20.SwapNotActive.selector, key, HTLCErc20.SwapState.Redeemed)
+        );
         htlc.redeem(preimage, amount, address(token), alice, timelock);
 
         // Neither may a refund of the already-redeemed swap.
         vm.warp(timelock);
         vm.prank(alice);
-        vm.expectRevert("HTLC: swap not found");
+        vm.expectRevert(
+            abi.encodeWithSelector(HTLCErc20.SwapNotActive.selector, key, HTLCErc20.SwapState.Redeemed)
+        );
         htlc.refund(preimageHash, amount, address(token), bob, timelock);
     }
 }
