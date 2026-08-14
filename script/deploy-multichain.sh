@@ -172,15 +172,24 @@ done
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
+# Block-explorer address-page base per chain, indexed like CHAINS.
+EXPLORERS=( "https://etherscan.io" "https://arbiscan.io" "https://polygonscan.com" )
+
 echo "============================================"
 echo "  Deployment Summary"
 echo "============================================"
 
 if [ ${#RESULTS[@]} -gt 0 ]; then
   echo ""
-  echo "Successful:"
+  echo "Successful (CREATE2 — same addresses on every chain):"
+  echo "  HTLCErc20:       $HTLC_ADDRESS"
+  echo "  HTLCCoordinator: $COORDINATOR_ADDRESS"
+  echo ""
   for i in "${RESULTS[@]}"; do
-    echo "  - ${CHAIN_NAMES[$i]}"
+    explorer="${EXPLORERS[$i]}"
+    echo "  ${CHAIN_NAMES[$i]}:"
+    echo "    HTLCErc20:       $explorer/address/$HTLC_ADDRESS"
+    echo "    HTLCCoordinator: $explorer/address/$COORDINATOR_ADDRESS"
   done
 fi
 
