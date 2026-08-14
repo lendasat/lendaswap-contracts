@@ -299,36 +299,7 @@ contract HTLCErc20 is Ownable2Step {
         bytes32 r,
         bytes32 s
     ) external nonReentrant returns (address claimAddress) {
-        // Scoped to reduce stack depth
-        {
-            bytes32 structHash = keccak256(
-                abi.encode(
-                    TYPEHASH_REFUND,
-                    preimageHash,
-                    amount,
-                    token,
-                    refundAddress,
-                    timelock,
-                    msg.sender,
-                    destination,
-                    sweepToken,
-                    minAmountOut
-                )
-            );
-            bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
-            claimAddress = ECDSA.recover(digest, v, r, s);
-        }
-
-        bytes32 key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
-        require(swaps[key], "HTLC: swap not found");
-
-        delete swaps[key];
-        lockedAmounts[token] -= amount;
-
-        emit SwapRefunded(preimageHash, key);
-
-        // Tokens go to msg.sender (the authorized caller), not refundAddress
-        IERC20(token).safeTransfer(msg.sender, amount);
+        revert("unimplemented");
     }
 
     // -- Owner functions --
