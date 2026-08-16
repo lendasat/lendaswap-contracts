@@ -71,7 +71,7 @@ contract HTLCErc20CreateAndRefundTest is Test {
 
         // 2. Alice tries to refund before timelock expires — should revert
         vm.prank(alice);
-        vm.expectRevert("HTLC: timelock not expired");
+        vm.expectRevert(HTLCErc20.TimelockNotExpired.selector);
         htlc.refund(preimageHash, amount, address(wbtc), bob, timelock);
 
         // Verify: nothing changed

@@ -30,7 +30,7 @@ type SwapKey is bytes32;
 contract HTLCErc20 is Ownable2Step {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 5;
+    uint8 public constant VERSION = 6;
 
     // -- EIP-712 --
     //
@@ -49,7 +49,7 @@ contract HTLCErc20 is Ownable2Step {
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256("HTLCErc20"),
-            keccak256("5"),
+            keccak256("6"),
             block.chainid,
             address(this)
         )
@@ -58,6 +58,20 @@ contract HTLCErc20 is Ownable2Step {
     // -- Errors --
 
     error Reentrancy();
+
+    error ZeroAmount();
+    error ZeroClaimAddress();
+    error ZeroRefundAddress();
+    error ZeroRecipient();
+    /// @dev The timelock must already lie in the future at creation…
+    error TimelockTooSoon();
+    /// @dev …and must have passed before a unilateral refund.
+    error TimelockNotExpired();
+    /// @dev Recovery found no balance beyond what active swaps are owed.
+    error NoExcess();
+    error EtherTransferFailed();
+    error OwnershipRequired();
+    error Unimplemented();
 
     /// @dev Settlement needs the key Active; the state names which lifecycle
     ///      stage the swap is actually in (None = never created, or already
@@ -338,7 +352,7 @@ contract HTLCErc20 is Ownable2Step {
         bytes32 r,
         bytes32 s
     ) external nonReentrant returns (address claimAddress) {
-        revert("unimplemented");
+        revert Unimplemented();
     }
 
     // -- Owner functions --
@@ -351,11 +365,11 @@ contract HTLCErc20 is Ownable2Step {
     /// @param token Token to recover the excess of
     /// @param to Recipient of the recovered tokens
     function recoverExcessToken(address token, address to) external onlyOwner nonReentrant {
-        require(to != address(0), "HTLC: zero recipient");
+        if (to == address(0)) revert ZeroRecipient();
 
         uint256 balance = IERC20(token).balanceOf(address(this));
         uint256 locked = lockedAmounts[token];
-        require(balance > locked, "HTLC: no excess");
+        if (balance <= locked) revert NoExcess();
 
         uint256 excess = balance - locked;
 
@@ -370,21 +384,21 @@ contract HTLCErc20 is Ownable2Step {
     ///      it belongs to a swap, so the full balance is recoverable.
     /// @param to Recipient of the recovered ether
     function recoverEther(address payable to) external onlyOwner nonReentrant {
-        require(to != address(0), "HTLC: zero recipient");
+        if (to == address(0)) revert ZeroRecipient();
 
         uint256 balance = address(this).balance;
-        require(balance > 0, "HTLC: no excess");
+        if (balance == 0) revert NoExcess();
 
         emit EtherRecovered(to, balance);
 
         (bool sent,) = to.call{value: balance}("");
-        require(sent, "HTLC: ether transfer failed");
+        if (!sent) revert EtherTransferFailed();
     }
 
     /// @dev Disabled: recovery is owner-gated, so an ownerless contract could never release
     ///      a mis-sent balance again. Use `transferOwnership` / `acceptOwnership` instead.
     function renounceOwnership() public pure override {
-        revert("HTLC: ownership required");
+        revert OwnershipRequired();
     }
 
     // -- View functions --
@@ -429,7 +443,7 @@ contract HTLCErc20 is Ownable2Step {
         address claimAddress,
         uint256 timelock
     ) internal {
-        require(block.timestamp >= timelock, "HTLC: timelock not expired");
+        if (block.timestamp < timelock) revert TimelockNotExpired();
 
         SwapKey key = _key(preimageHash, amount, token, msg.sender, claimAddress, timelock);
         SwapState state = swaps[key];
@@ -449,13 +463,13 @@ contract HTLCErc20 is Ownable2Step {
         address claimAddress,
         uint256 timelock
     ) internal {
-        require(amount > 0, "HTLC: zero amount");
-        require(timelock > block.timestamp, "HTLC: timelock too soon");
+        if (amount == 0) revert ZeroAmount();
+        if (timelock <= block.timestamp) revert TimelockTooSoon();
         // Neither party may be address(0). It is the address a failed signature recovery
         // resolves to, so it must never be a claimAddress that a key commits to, and a
         // zero refundAddress could never reclaim the swap once its timelock expires.
-        require(claimAddress != address(0), "HTLC: zero claim address");
-        require(refundAddress != address(0), "HTLC: zero refund address");
+        if (claimAddress == address(0)) revert ZeroClaimAddress();
+        if (refundAddress == address(0)) revert ZeroRefundAddress();
 
         SwapKey key = _key(preimageHash, amount, token, refundAddress, claimAddress, timelock);
         // Also rejects settled keys: the key's terms are spent — a redeemed key's

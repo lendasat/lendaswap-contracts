@@ -349,7 +349,7 @@ contract HTLCCoordinatorPermit2Test is Test {
         bytes32 witness = _computeWitness(preimageHash, address(wbtc), bob, address(coordinator), timelock, calls);
         bytes memory signature = _signPermit2WitnessTransfer(permit, witness, alicePk);
 
-        vm.expectRevert("Coordinator: restricted target");
+        vm.expectPartialRevert(HTLCCoordinator.RestrictedTarget.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );

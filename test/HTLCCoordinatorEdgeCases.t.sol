@@ -131,7 +131,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
             _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
-        vm.expectRevert("Coordinator: restricted target");
+        vm.expectPartialRevert(HTLCCoordinator.RestrictedTarget.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );
@@ -148,7 +148,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
             _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
-        vm.expectRevert("Coordinator: restricted target");
+        vm.expectPartialRevert(HTLCCoordinator.RestrictedTarget.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );
@@ -166,7 +166,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
             _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
-        vm.expectRevert("Coordinator: insufficient balance");
+        vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );
@@ -206,7 +206,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         );
 
         vm.prank(bob);
-        vm.expectRevert("Coordinator: insufficient balance");
+        vm.expectRevert(HTLCCoordinator.InsufficientBalance.selector);
         coordinator.redeemAndExecute(
             preimage, wbtcAmount, address(wbtc), alice, timelock,
             calls, address(usdc), tooHighMinOut,
@@ -224,7 +224,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         vm.warp(timelock + 1);
 
-        vm.expectRevert("Coordinator: unknown HTLC");
+        vm.expectRevert(HTLCCoordinator.UnknownHtlc.selector);
         coordinator.refundAndExecute(
             preimageHash, wbtcAmount, address(wbtc), bob, timelock,
             emptyCalls, address(wbtc), 0
@@ -234,7 +234,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
     function test_refundTo_unknownHTLC_reverts() public {
         vm.warp(timelock + 1);
 
-        vm.expectRevert("Coordinator: unknown HTLC");
+        vm.expectRevert(HTLCCoordinator.UnknownHtlc.selector);
         coordinator.refundTo(preimageHash, wbtcAmount, address(wbtc), bob, timelock);
     }
 
@@ -270,7 +270,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
 
         // Attacker calls refundAndExecute — should be rejected
         vm.prank(attacker);
-        vm.expectRevert("Coordinator: unauthorized");
+        vm.expectRevert(HTLCCoordinator.Unauthorized.selector);
         coordinator.refundAndExecute(
             preimageHash, wbtcAmount, address(wbtc), bob, timelock,
             maliciousCalls, address(wbtc), 0
@@ -341,7 +341,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
             _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
-        vm.expectRevert("Coordinator: call failed");
+        vm.expectPartialRevert(HTLCCoordinator.CallFailed.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );
@@ -362,7 +362,7 @@ contract HTLCCoordinatorEdgeCasesTest is Test {
         (ISignatureTransfer.PermitTransferFrom memory permit, bytes memory signature) =
             _signPermit2(address(usdc), usdcAmount, 0, address(coordinator), calls);
 
-        vm.expectRevert("Coordinator: transferFrom not allowed");
+        vm.expectPartialRevert(HTLCCoordinator.DangerousSelector.selector);
         coordinator.executeAndCreateWithPermit2(
             calls, preimageHash, address(wbtc), bob, timelock, alice, permit, signature
         );

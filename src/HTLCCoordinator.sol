@@ -21,7 +21,7 @@ import {HTLCErc20, SwapKey} from "./HTLCErc20.sol";
 contract HTLCCoordinator {
     using SafeERC20 for IERC20;
 
-    uint8 public constant VERSION = 3;
+    uint8 public constant VERSION = 4;
 
     bytes32 public constant TYPEHASH_EXECUTE_AND_CREATE = keccak256(
         "ExecuteAndCreate(bytes32 preimageHash,address token,address claimAddress,address refundAddress,uint256 timelock,bytes32 callsHash)"
@@ -38,7 +38,7 @@ contract HTLCCoordinator {
         abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256("HTLCCoordinator"),
-            keccak256("3"),
+            keccak256("4"),
             block.chainid,
             address(this)
         )
@@ -47,6 +47,22 @@ contract HTLCCoordinator {
     // -- Errors --
 
     error Reentrancy();
+
+    /// @dev The router's balance is below the required minimum for the operation.
+    error InsufficientBalance();
+    /// @dev No deposit is recorded for this HTLC key.
+    error UnknownHtlc();
+    /// @dev msg.sender is not the recorded depositor.
+    error Unauthorized();
+    error InvalidDepositorSignature();
+    /// @dev One of the arbitrary calls failed; carries its index in the batch.
+    error CallFailed(uint256 index);
+    error EtherTransferFailed();
+    /// @dev The call targets a contract calls must never touch (HTLC, self, Permit2).
+    error RestrictedTarget(address target);
+    /// @dev The calldata starts with a transferFrom-family selector that could
+    ///      drain third-party approvals.
+    error DangerousSelector(bytes4 selector);
 
     // -- Types --
 
@@ -126,7 +142,7 @@ contract HTLCCoordinator {
         _executeCalls(calls);
 
         uint256 balance = IERC20(token).balanceOf(address(this));
-        require(balance > 0, "Coordinator: insufficient balance");
+        if (balance == 0) revert InsufficientBalance();
 
         IERC20(token).forceApprove(address(HTLC), balance);
         HTLC.create(preimageHash, balance, token, claimAddress, timelock);
@@ -205,8 +221,8 @@ contract HTLCCoordinator {
     ) external nonReentrant {
         SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
-        require(depositor != address(0), "Coordinator: unknown HTLC");
-        require(msg.sender == depositor, "Coordinator: unauthorized");
+        if (depositor == address(0)) revert UnknownHtlc();
+        if (msg.sender != depositor) revert Unauthorized();
 
         delete deposits[key];
 
@@ -237,7 +253,7 @@ contract HTLCCoordinator {
     ) external nonReentrant {
         SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
-        require(depositor != address(0), "Coordinator: unknown HTLC");
+        if (depositor == address(0)) revert UnknownHtlc();
 
         delete deposits[key];
 
@@ -283,7 +299,7 @@ contract HTLCCoordinator {
         // 1. Look up depositor from coordinator's mapping
         SwapKey key = HTLC.computeKey(preimageHash, amount, token, address(this), claimAddress, timelock);
         address depositor = deposits[key];
-        require(depositor != address(0), "Coordinator: unknown HTLC");
+        if (depositor == address(0)) revert UnknownHtlc();
 
         // 2. Verify depositor's EIP-712 signature (coordinator-level)
         {
@@ -304,7 +320,7 @@ contract HTLCCoordinator {
             );
             bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
             address recovered = ecrecover(digest, depositorV, depositorR, depositorS);
-            require(recovered == depositor, "Coordinator: invalid depositor signature");
+            if (recovered != depositor) revert InvalidDepositorSignature();
         }
 
         // 3. Clear the deposit record
@@ -345,7 +361,7 @@ contract HTLCCoordinator {
             _revertIfDangerousSelector(c.callData);
 
             (bool success,) = c.target.call{value: c.value}(c.callData);
-            if (!success) revert("Coordinator: call failed");
+            if (!success) revert CallFailed(i);
         }
     }
 
@@ -357,12 +373,12 @@ contract HTLCCoordinator {
             balance = IERC20(token).balanceOf(address(this));
         }
 
-        require(balance >= minAmountOut, "Coordinator: insufficient balance");
+        if (balance < minAmountOut) revert InsufficientBalance();
         if (balance == 0) return;
 
         if (token == address(0)) {
             (bool success,) = payable(destination).call{value: balance}("");
-            if (!success) revert("Coordinator: call failed");
+            if (!success) revert EtherTransferFailed();
         } else {
             IERC20(token).safeTransfer(destination, balance);
         }
@@ -421,24 +437,27 @@ contract HTLCCoordinator {
     function _revertIfDangerousSelector(bytes calldata callData) internal pure {
         if (callData.length >= 4) {
             bytes4 selector = bytes4(callData[:4]);
-            // ERC-20/721 transferFrom
-            require(selector != bytes4(0x23b872dd), "Coordinator: transferFrom not allowed");
-            // ERC-721 safeTransferFrom(address,address,uint256)
-            require(selector != bytes4(0x42842e0e), "Coordinator: transferFrom not allowed");
-            // ERC-721 safeTransferFrom(address,address,uint256,bytes)
-            require(selector != bytes4(0xb88d4fde), "Coordinator: transferFrom not allowed");
-            // ERC-1155 safeTransferFrom
-            require(selector != bytes4(0xf242432a), "Coordinator: transferFrom not allowed");
-            // ERC-1155 safeBatchTransferFrom
-            require(selector != bytes4(0x2eb2c2d6), "Coordinator: transferFrom not allowed");
+            if (
+                // ERC-20/721 transferFrom
+                selector == bytes4(0x23b872dd)
+                // ERC-721 safeTransferFrom(address,address,uint256)
+                || selector == bytes4(0x42842e0e)
+                // ERC-721 safeTransferFrom(address,address,uint256,bytes)
+                || selector == bytes4(0xb88d4fde)
+                // ERC-1155 safeTransferFrom
+                || selector == bytes4(0xf242432a)
+                // ERC-1155 safeBatchTransferFrom
+                || selector == bytes4(0x2eb2c2d6)
+            ) {
+                revert DangerousSelector(selector);
+            }
         }
     }
 
     function _revertIfRestricted(address target) internal view {
-        require(
-            target != address(HTLC) && target != address(this) && target != address(PERMIT2),
-            "Coordinator: restricted target"
-        );
+        if (target == address(HTLC) || target == address(this) || target == address(PERMIT2)) {
+            revert RestrictedTarget(target);
+        }
     }
 
     /// @dev Accept ETH (e.g. from Uniswap refunds or WETH unwrapping)

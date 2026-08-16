@@ -127,7 +127,7 @@ contract HTLCErc20RecoveryTest is Test {
 
     function test_recoverExcessToken_withNoSurplus_reverts() public {
         _lock(1e8);
-        vm.expectRevert(bytes("HTLC: no excess"));
+        vm.expectRevert(HTLCErc20.NoExcess.selector);
         htlc.recoverExcessToken(address(wbtc), treasury);
     }
 
@@ -144,7 +144,7 @@ contract HTLCErc20RecoveryTest is Test {
         vm.prank(alice);
         wbtc.transfer(address(htlc), 1e8);
 
-        vm.expectRevert(bytes("HTLC: zero recipient"));
+        vm.expectRevert(HTLCErc20.ZeroRecipient.selector);
         htlc.recoverExcessToken(address(wbtc), address(0));
     }
 
@@ -162,7 +162,7 @@ contract HTLCErc20RecoveryTest is Test {
     }
 
     function test_recoverEther_withNoBalance_reverts() public {
-        vm.expectRevert(bytes("HTLC: no excess"));
+        vm.expectRevert(HTLCErc20.NoExcess.selector);
         htlc.recoverEther(payable(treasury));
     }
 
@@ -176,7 +176,7 @@ contract HTLCErc20RecoveryTest is Test {
     // -- Ownership --
 
     function test_renounceOwnership_reverts() public {
-        vm.expectRevert(bytes("HTLC: ownership required"));
+        vm.expectRevert(HTLCErc20.OwnershipRequired.selector);
         htlc.renounceOwnership();
     }
 
